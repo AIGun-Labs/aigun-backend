@@ -5,7 +5,7 @@ import settings
 from middleware.lifespan import on_startup
 from middleware.security import RS256Checker
 from fastapi.websockets import WebSocket
-from typing import Awaitable, Callable, Any, Optional
+from typing import Awaitable, Callable, Any, Optional, List
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel, ValidationError
 
@@ -15,7 +15,7 @@ from uuid6 import uuid7
 from apps.websocket import models
 
 from apps.websocket.models import WebSocketRequest, WebSocketMessage
-
+from apps.websocket import services
 from views.render import JsonResponseEncoder
 
 from data.logger import create_logger
