@@ -49,7 +49,6 @@ try:
     with open(JWT_PRIVATE_FILE_PATH, 'r') as f:
         JWT_PRIVATE_KEY = f.read().strip()
 except FileNotFoundError:
-    print(f"Error: Private key file {JWT_PRIVATE_FILE_PATH} not found.")
     JWT_PRIVATE_KEY = ""
 
 
@@ -60,7 +59,6 @@ try:
     with open(JWT_PUBLIC_FILE_PATH, 'r') as f:
         JWT_PUBLIC_KEY = f.read().strip()
 except FileNotFoundError:
-    print(f"Error: Private key file {JWT_PUBLIC_FILE_PATH} not found.")
     JWT_PUBLIC_KEY = ""
 
 

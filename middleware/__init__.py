@@ -9,7 +9,7 @@ import settings
 # Register middleware
 def register_middleware(app: FastAPI):
     # Add custom middleware
-    app.add_middleware(RequestMiddleware, public_key=open(settings.JWT_PUBLIC_FILE_PATH).read())
+    app.add_middleware(RequestMiddleware, public_key=settings.JWT_PUBLIC_KEY)
 
     app.add_middleware(
         CORSMiddleware,
