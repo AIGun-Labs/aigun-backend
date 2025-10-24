@@ -1,14 +1,12 @@
-import httpx
-from fastapi import FastAPI, Response, Depends
-from starlette.responses import StreamingResponse
+import time
 
+import asyncio
+from fastapi import FastAPI, Depends
 from app.dependencies import request_init
-from middleware.lifespan import on_startup
 from middleware.request import Request
-from views.render import Text, Json, HTTPException
+from utils.status_checker import status_checker
+from views.render import Text
 from data.logger import create_logger
-from data.fetch import AsyncLimitClient
-from views.render import APIResponse
 
 
 
@@ -29,38 +27,38 @@ def on_init(app: FastAPI):
     async def _():
         return Text('pong')
 
-    @app.get("/version", description="Version information")
-    async def _():
-        return APIResponse(data={
-            "version": "0.0.1",
-            "download_apk": "test"
-        })
 
+    @app.get("/check")
+    async def check_services_status(request=Depends(request_init(verify=False, limiter=False))):
+        """
+        Check the health status of all services
+        - Database
+        - Cache
+        - Message queue
+        """
+        # Check all services in parallel
+        db_task = asyncio.create_task(status_checker.check_database(request))
+        redis_task = asyncio.create_task(status_checker.check_redis(request))
+        rabbitmq_task = asyncio.create_task(status_checker.check_rabbitmq(request))
 
-    @app.get("/api/v1/proxy")
-    async def get_image_data(url, request=Depends(request_init(verify=False, limiter=False))):
+        # Wait for all checks to complete
+        db_status, redis_status, rabbitmq_status = await asyncio.gather(
+            db_task, redis_task, rabbitmq_task,
+            return_exceptions=False
+        )
 
-        from curl_cffi import AsyncSession
-
-        headers = {
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+        # Determine overall status
+        services = {
+            "database": db_status,
+            "redis": redis_status,
+            "rabbitmq": rabbitmq_status
         }
 
-        try:
-            async with AsyncSession(proxy="https://twitter:n4vsD4_kjcAPy3F2az@dc.decodo.com:10000") as session:
-                response = await session.get(
-                    url,
-                    headers=headers,
-                    impersonate="chrome110",
-                    timeout=180,
-                )
+        all_healthy = all(service["status"] == "healthy" for service in services.values())
+        overall_status = "healthy" if all_healthy else "unhealthy"
 
-                # Get Content-Type from response headers
-                content_type = response.headers.get("Content-Type", "image/jpeg")
-
-                # Return image data directly
-                return Response(content=response.content, media_type=content_type)
-
-        except Exception as e:
-            logger.exception(f"Proxy request failed")
-            return Response(content=f"Failed to get image: {str(e)}", status_code=500)
+        return {
+            "status": overall_status,
+            "timestamp": time.time(),
+            "services": services
+        }
