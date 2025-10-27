@@ -59,7 +59,14 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
         IntelligenceModel.entity_intelligences
     ).selectinload(
         EntityIntelligenceModel.entity
-    )
+    ).options(
+          selectinload(EntityModel.token_entity).selectinload(TokenModel.chain_datas).selectinload(
+              TokenChainDataModel.chain),
+          selectinload(EntityModel.tokendata_entity).selectinload(TokenChainDataModel.chain),
+          selectinload(EntityModel.entity_tags),
+          selectinload(EntityModel.entity_NewsPlatform),
+          selectinload(EntityModel.exchange_platform)
+      )
 
     # Query intelligence data and immediately release database connection
     async with request.context.database.dogex() as session:
