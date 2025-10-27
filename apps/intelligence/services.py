@@ -106,6 +106,24 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
     for intelligence in intelligences:
         intelligence_info = schemas.IntelligenceListOutSchema.model_validate(intelligence).model_dump()
 
+        # Supplement displayed associated tokens
+        intelligence_info["entities"] = await get_showed_tokens_info(request, intelligence_info["showed_tokens"], chain_infos, intelligence)
+
+        # Supplement author field
+        intelligence_info["author"] = await ws_services.get_author_info(intelligence_info, request.context)
+
+        # Supplement monitor_time field
+        intelligence_info["monitor_time"] = await ws_services.get_monitor_time(intelligence_info["spider_time"], intelligence_info["published_at"])
+
+        intelligence_info["ai_agent"] = {
+            "avatar": "image/h0bk-B4SP5-3nqM8JpjEXSW9u2dXcDbKGGAvI8m7GIgXPC4J_Yp5dZMKC8TPFb2lrZZPBuF3wCOyvWU091MujA==",
+            "name": {
+                "en": "Event Hunter",
+                "zh": "Event Hunter"
+            }
+        }
+
+        del intelligence_info["showed_tokens"]
 
         result.append(intelligence_info)
 
