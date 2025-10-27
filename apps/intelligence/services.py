@@ -38,6 +38,21 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
         subtype_condition = (IntelligenceModel.subtype == query_params.subtype)
         filter_list.append(subtype_condition)
 
+    # Filter by value judgment
+    if query_params.is_valuable is not None:
+        valuable_condition = (IntelligenceModel.is_valuable == bool(query_params.is_valuable))
+        filter_list.append(valuable_condition)
+
+    # Filter by keyword
+    if query_params.key_word:
+        key_word_condition = or_(
+            IntelligenceModel.content.ilike(f"%{query_params.key_word}%"),
+            cast(IntelligenceModel.analyzed["zh"], String).ilike(
+                f"%{query_params.key_word}%"
+            )
+        )
+        filter_list.append(key_word_condition)
+
 
     # Preload related tables
     entity_load_options = selectinload(
