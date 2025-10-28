@@ -10,7 +10,6 @@ import settings
 from data.db import Base
 
 
-
 class IntelligenceModel(Base):
     """
     Intelligence Table
@@ -110,6 +109,10 @@ class EntityModel(Base):
     # Influence level enum values
     INFLUENCE_LEVEL_VALUE = settings.INFLUENCE_LEVEL_VALUE
 
+    entity_tags = relationship("EntityTagModel", back_populates="entity", lazy="select",
+                               primaryjoin="EntityModel.id == EntityTagModel.entity_id",
+                               foreign_keys="[EntityTagModel.entity_id]")
+
     entity_intelligences = relationship("EntityIntelligenceModel", back_populates="entity", lazy="select",
                                         primaryjoin="EntityModel.id == EntityIntelligenceModel.entity_id",
                                         foreign_keys="[EntityIntelligenceModel.entity_id]")
@@ -117,6 +120,22 @@ class EntityModel(Base):
     entity_datasources = relationship("EntityDatasource", back_populates="entity", lazy="select",
                                       primaryjoin="EntityModel.id == EntityDatasource.entity_id",
                                       foreign_keys="[EntityDatasource.entity_id]")
+
+    token_entity = relationship("TokenModel", back_populates="token_entity", lazy="select",
+                                primaryjoin="EntityModel.id == TokenModel.entity_id",
+                                foreign_keys="[TokenModel.entity_id]")
+
+    tokendata_entity = relationship("TokenChainDataModel", back_populates="tokendata_entity", lazy="select",
+                                    primaryjoin="EntityModel.id == TokenChainDataModel.entity_id",
+                                    foreign_keys="[TokenChainDataModel.entity_id]")
+
+    entity_NewsPlatform = relationship("NewsPlatformModel", back_populates="entity_NewsPlatformModel", lazy="select",
+                                       primaryjoin="EntityModel.id == NewsPlatformModel.entity_id",
+                                       foreign_keys="[NewsPlatformModel.entity_id]")
+
+    exchange_platform = relationship("ExchangeModel", back_populates="entity_ExchangeModel", lazy="select",
+                                     primaryjoin="EntityModel.id == ExchangeModel.entity_id",
+                                     foreign_keys="[ExchangeModel.entity_id]")
 
 
 class TokenChainDataModel(Base):
@@ -204,3 +223,86 @@ class AccountModel(Base):
     entity_datasource = relationship("EntityDatasource", back_populates="account", uselist=False, lazy="select",
                                      primaryjoin="AccountModel.id == EntityDatasource.account_id",
                                      foreign_keys="[EntityDatasource.account_id]")
+
+
+class TokenModel(Base):
+    __tablename__ = "project"
+
+    entity_id = Column(UUID(as_uuid=True))
+    name = Column(Text)
+    symbol = Column(Text)
+    description = Column(Text, nullable=True)
+    logo = Column(Text, nullable=True)
+    established_at = Column(TIMESTAMP, nullable=True)
+    issued_at = Column(TIMESTAMP, nullable=True)
+    lending_total = Column(Double, nullable=True)
+
+    chain_datas = relationship("TokenChainDataModel", back_populates="chain_datas", lazy="select",
+                               primaryjoin="TokenModel.id == TokenChainDataModel.project_id",
+                               foreign_keys="[TokenChainDataModel.project_id]")
+    token_entity = relationship("EntityModel", back_populates="token_entity", lazy="select",
+                                primaryjoin="TokenModel.entity_id == EntityModel.id",
+                                foreign_keys=[entity_id])
+
+
+class NewsPlatformModel(Base):
+    __tablename__ = "news_platform"
+
+    name = Column(Text)
+    content_type = Column(Text)
+    extra_data = Column(JSONB)
+    entity_id = Column(UUID(as_uuid=True))
+    type = Column(Text)
+    interval = Column(Text)
+
+    entity_NewsPlatformModel = relationship("EntityModel", back_populates="entity_NewsPlatform", lazy="select",
+                                            primaryjoin="NewsPlatformModel.entity_id == EntityModel.id",
+                                            foreign_keys=[entity_id])
+
+
+class ExchangeModel(Base):
+    __tablename__ = "exchange_platform"
+
+    entity_id = Column(UUID(as_uuid=True))
+    type = Column(Text)
+    name = Column(Text)
+    content_type = Column(Text)
+    interval = Column(Text)
+    extra_data = Column(JSONB)
+    entity_ExchangeModel = relationship("EntityModel", back_populates="exchange_platform", lazy="select",
+                                        primaryjoin="ExchangeModel.entity_id == EntityModel.id",
+                                        foreign_keys=[entity_id])
+
+
+class EntityTagModel(Base):
+    __tablename__ = "entity_tag"
+
+    entity_id = Column(UUID(as_uuid=True), index=True, comment="entity ID")
+    tag_id = Column(UUID(as_uuid=True), index=True)
+    type = Column(String)
+
+    entity = relationship("EntityModel", back_populates="entity_tags", lazy="select",
+                          primaryjoin="EntityTagModel.entity_id == EntityModel.id", foreign_keys=[entity_id])
+    tag = relationship("TagModel", back_populates="entity_tags", lazy="select",
+                       primaryjoin="EntityTagModel.tag_id == TagModel.id", foreign_keys=[tag_id])
+
+
+class TagModel(Base):
+    __tablename__ = "tag"
+
+    slug = Column(String)
+    is_visible = Column(Boolean, nullable=False, default=True)
+
+    entity_tags = relationship("EntityTagModel", back_populates="tag", lazy="select",
+                               primaryjoin="TagModel.id == EntityTagModel.tag_id",
+                               foreign_keys="[EntityTagModel.tag_id]")
+    tag_intelligences = relationship(
+        "TagIntelligenceModel",
+        back_populates="tag",
+        lazy="select",
+        primaryjoin="TagModel.id == TagIntelligenceModel.tag_id",
+        foreign_keys="[TagIntelligenceModel.tag_id]"
+    )
+
+    ai_agent = relationship("AiAgentModel", back_populates="tag", lazy="select",
+                            primaryjoin="TagModel.id == AiAgentModel.tag_id", foreign_keys="[AiAgentModel.tag_id]")
