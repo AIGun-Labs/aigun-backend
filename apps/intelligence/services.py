@@ -1,6 +1,8 @@
+import json
 
 from sqlalchemy import select
 from apps.intelligence.models import *
+from apps.intelligence import models
 
 from sqlalchemy.orm import selectinload
 from apps.intelligence import schemas
@@ -12,6 +14,8 @@ from sqlalchemy import cast, String
 
 from sqlalchemy.orm import defer
 
+from views.render import JsonResponseEncoder
+
 
 async def list_intelligence(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int):
     """
@@ -20,8 +24,6 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
 
     master_cache = request.context.mastercache.backend
     offset: int = (page - 1) * page_size
-
-    user_followed_tag_ids = ["01998fe3-dc40-748e-bf30-b9acc6e94497"]
 
     filter_list = []
 
@@ -135,4 +137,55 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
         result.append(intelligence_info)
 
     return result, total
+
+async def get_chain_infos(reqeust: Request, intelligences):
+    # Retrieve chain messages of all associated tokens with all intelligence from showed_token
+    networks = []
+    for intelligence in intelligences:
+        showed_tokens = intelligence.showed_tokens
+        if not showed_tokens:
+            networks = []
+            break
+        for showed_token in showed_tokens:
+            network = showed_token["slug"]
+            networks.append(network)
+
+    # Compatible with situations where showed_token is empty
+    if not networks:
+        for intelligence in intelligences:
+            for ei in intelligence.entity_intelligences:
+                if ei.type == "author":
+                    pass
+
+                if ei.entity and ei.entity.tokendata_entity:
+                    for project_chain_data in ei.entity.tokendata_entity:
+                        networks.append(project_chain_data.network)
+
+    slave_cache = reqeust.context.slavecache.backend
+    master_cache = reqeust.context.mastercache.backend
+
+    data = await slave_cache.get(f"dogex:intelligence:chain_infos:networks:{networks}")
+    if data is not None:
+        await master_cache.expire(name=f"dogex:intelligence:chain_infos:networks:{networks}", time=settings.EXPIRES_FOR_CHAIN_INFOS)
+        return json.loads(data.decode("utf-8"))
+
+    async with reqeust.context.database.dogex() as session:
+        sql = select(
+            models.ChainModel.id,
+            models.ChainModel.network_id,
+            models.ChainModel.name,
+            models.ChainModel.symbol,
+            models.ChainModel.slug,
+            models.ChainModel.logo
+        ).where(
+            models.ChainModel.slug.in_(networks)
+        )
+
+        results = (await session.execute(sql)).mappings().all()
+
+        data = {str(chain_info["id"]): chain_info for chain_info in results}
+
+        await master_cache.set(name=f"dogex:intelligence:chain_infos:networks:{networks}", value=json.dumps(data, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_CHAIN_INFOS)
+
+        return data
 
