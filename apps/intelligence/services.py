@@ -1,4 +1,5 @@
 import json
+from typing import Optional, List
 
 from sqlalchemy import select
 from apps.intelligence.models import *
@@ -7,6 +8,7 @@ from apps.intelligence import models
 from sqlalchemy.orm import selectinload
 from apps.intelligence import schemas
 from apps.websocket import services as ws_services
+from data import create_logger
 
 from middleware import Request
 from sqlalchemy import and_, or_
@@ -16,6 +18,7 @@ from sqlalchemy.orm import defer
 
 from views.render import JsonResponseEncoder
 
+logger = create_logger("dogex-intelligence")
 
 async def list_intelligence(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int):
     """
@@ -189,3 +192,96 @@ async def get_chain_infos(reqeust: Request, intelligences):
 
         return data
 
+
+
+async def get_showed_tokens_info(request: Request, showed_tokens: Optional[List], chain_infos, intelligence):
+    # Chain default model
+    chain_info = {
+        "id": None,
+        "network_id": None,
+        "name": None,
+        "symbol": None,
+        "logo": None,
+    }
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    # Retrieve hot data from the cache first
+    key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence.id)}"
+    entities = await slave_cache.get(key)
+    if entities:
+        return json.loads(entities.decode("utf-8"))
+
+    # Compatible with situations where showed_token is empty (without cold data conversion)
+    entities = []
+
+    if not showed_tokens:
+        return []
+
+    # Showed_token exists (the actual data that has been displayed to users after being cooled down does not need to be sorted or filtered anymore)
+    # Step 1: Collect all pairs of (network, contract_address) that need to be queried
+    token_keys = [(showed_token["slug"], showed_token["contract_address"]) for showed_token in showed_tokens]
+
+    # Step 2: Batch query all tokens (one database query)
+    async with request.context.database.dogex() as session:
+        # Build OR conditions to match all tokens
+        conditions = [
+            and_(
+                models.TokenChainDataModel.network == network,
+                models.TokenChainDataModel.contract_address == contract_address
+            )
+            for network, contract_address in token_keys
+        ]
+
+        sql = select(models.TokenChainDataModel).where(or_(*conditions))
+
+        tokens = (await session.execute(sql)).scalars().all()
+
+        # Step 3: Build a lookup dictionary with the key (network, contract_address)
+        token_dict = {
+            (token.network, token.contract_address): token
+            for token in tokens
+        }
+
+    # Step 4: Traverse showed_token and retrieve the corresponding token data from the dictionary
+    for showed_token in showed_tokens:
+        network = showed_token["slug"]
+        contract_address = showed_token["contract_address"]
+        warning_price_usd = float(showed_token["warning_price_usd"])
+        warning_market_cap = float(showed_token["warning_market_cap"])
+
+        # Search for tokens from the dictionary
+        token = token_dict.get((network, contract_address))
+
+        if not token:
+            logger.error(f"The token in showed_token does not exist，intelligence_id: {str(intelligence.id)}, token info：{showed_token}")
+            continue
+        try:
+            token_data = {
+                "id": token.id,
+                "entity_id": token.entity_id,
+                "name": token.name,
+                "symbol": token.symbol,
+                "standard": token.standard,
+                "decimals": token.decimals,
+                "contract_address": token.contract_address,
+                "logo": token.logo,
+                "stats": {
+                    "warning_price_usd": warning_price_usd if warning_price_usd else 0,
+                    "warning_market_cap": warning_market_cap if warning_market_cap else 0,
+                    "current_price_usd": token.price_usd if token.price_usd else 0,
+                    "current_market_cap": token.market_cap if token.market_cap else 0,
+                    "highest_increase_rate": token.price_usd / warning_price_usd if warning_price_usd != 0 else 0
+                },
+                "chain": chain_infos.get(str(token.chain_id)) if chain_infos.get(str(token.chain_id)) else chain_info,
+                "is_native": token.is_native if token.is_native is not None else False,
+                "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            }
+        except:
+            token_data = None
+        entities.append(token_data)
+
+    # Cold data to hot data conversion
+    await master_cache.set(name=key, value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_SHOWED_TOKENS)
+    return entities
