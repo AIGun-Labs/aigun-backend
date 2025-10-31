@@ -125,7 +125,8 @@ EXPIRES_FOR_TOKEN_URLS = int(os.getenv('EXPIRES_FOR_SEARCH_TOKEN', 86400 * 3))
 # AI Agent List Cache Time
 EXPIRES_FOR_AI_AGENT_LIST = int(os.getenv('EXPIRES_FOR_AI_AGENT_LIST', 60 * 5))
 
-
+# The Highest Increase Rate Cache Time
+EXPIRES_FOR_HIGHEST_INCREASE_RATE = int(os.getenv('EXPIRES_FOR_AI_AGENT_LIST', 60 * 30))
 
 
 # Wallet Root Path

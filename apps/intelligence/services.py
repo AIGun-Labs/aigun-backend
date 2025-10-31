@@ -311,3 +311,47 @@ async def retrieve_token(request: Request, network: str, address: str):
         token_info["highest_increase_rate"] = await get_highest_increase_rate_v2(request, network, address)
 
         return token_info
+
+
+async def get_highest_increase_rate_v2(request: Request, network: str, address: str):
+    """
+    new version to get the highest increase rate
+    """
+    try:
+        master_cache = request.context.mastercache.backend
+        slave_cache = request.context.slavecache.backend
+        key = f"dogex:intelligence:highest_increase_rate:network:{network}:address:{address}"
+
+        # get from cache
+        highest_increase_rate = await slave_cache.get(key)
+        if highest_increase_rate:
+            return float(highest_increase_rate.decode("utf-8"))
+
+        async with request.context.database.dogex() as session:
+            # Take the highest profit value among all intelligence (the token may appear in multiple intelligence, and multiple intelligence represent multiple highest profits)
+            sql = select(
+                func.max(models.EntityIntelligenceModel.highest_increase_rate).label('max_rate')
+            ).join(
+                models.EntityIntelligenceModel.entity
+            ).join(
+                models.EntityModel.tokendata_entity
+            ).where(
+                and_(
+                    models.TokenChainDataModel.contract_address == address,
+                    models.TokenChainDataModel.network == network,
+                    models.EntityIntelligenceModel.is_deleted == False
+                )
+            )
+
+            max_rate = (await session.execute(sql)).scalars().first()
+            if not max_rate:
+                max_rate = 0.0
+
+            await master_cache.set(name=key, value=max_rate, ex=settings.EXPIRES_FOR_HIGHEST_INCREASE_RATE)
+
+            return max_rate
+
+    except Exception as e:
+        logger.exception(f"Failed to obtain all the intelligence of the token and the maximum profit, {e}")
+        max_rate = 0.0
+        return max_rate
