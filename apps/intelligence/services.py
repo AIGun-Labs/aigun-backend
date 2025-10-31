@@ -285,3 +285,29 @@ async def get_showed_tokens_info(request: Request, showed_tokens: Optional[List]
     # Cold data to hot data conversion
     await master_cache.set(name=key, value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_SHOWED_TOKENS)
     return entities
+
+
+
+async def retrieve_token(request: Request, network: str, address: str):
+
+
+    async with request.context.database.dogex() as session:
+        sql = select(
+            models.TokenChainDataModel
+        ).where(
+            models.TokenChainDataModel.network == network,
+            models.TokenChainDataModel.contract_address == address
+        )
+
+        token = (await session.execute(sql)).scalars().first()
+
+        if not token:
+
+            logger.warning(f"Token does not exist，network: {network}, address: {address}")
+            return {}
+
+        token_info = schemas.TokenInfoOutSchema.model_validate(token).model_dump()
+
+        token_info["highest_increase_rate"] = await get_highest_increase_rate_v2(request, network, address)
+
+        return token_info

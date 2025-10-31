@@ -44,3 +44,15 @@ async def get_intelligences_list(
 
 
     return APIResponse(code=code.CODE_OK, msg=msg.SUCCESS, data=result, page=page_query.page, page_size=page_query.page_size, total=total)
+
+
+
+@router.get("/token/info")
+async def get_token_info(network: str, address: str, token_type: Optional[str] = None,
+                         request=Depends(request_init(verify=False, limiter=False))):
+    """
+    Get token details
+    """
+
+    token = await retrieve_token(request, network, address)
+    return APIResponse(data=token, is_pagination=False)
