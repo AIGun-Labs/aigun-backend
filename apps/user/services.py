@@ -20,11 +20,13 @@ class AiAgentFollowServices:
         slave_cache = request.context.slavecache.backend
         if not slave_cache:
             slave_cache = master_cache
+
         # Try to get from cache first
         cache_key = f"dogex:intel_user:ai_agent_list"
         cached_data = await slave_cache.get(cache_key)
         if cached_data:
             agent_dicts = json.loads(cached_data.decode("utf-8"))
+
             # Restore to Pydantic model list
             return [schemas.AiAgentOutSchema.model_validate(d) for d in agent_dicts]
 
@@ -38,8 +40,10 @@ class AiAgentFollowServices:
             for agent in agents:
                 agent_data = schemas.AiAgentOutSchema.model_validate(agent)
                 ai_agent_data.append(agent_data)
+
         # Convert Pydantic models to dictionaries for JSON serialization, and set cache expiration (seconds)
         ai_agent_dicts = [m.model_dump() for m in ai_agent_data]
+
         # Cache AI Agent list, expiration time adjusted to 1 day
         await master_cache.set(
             cache_key,
