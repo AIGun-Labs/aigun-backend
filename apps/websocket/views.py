@@ -16,6 +16,8 @@ from apps.websocket import models
 
 from apps.websocket.models import WebSocketRequest, WebSocketMessage
 from apps.websocket import services
+from apps.user import schemas as user_schemas
+from apps.user import services as user_services
 from views.render import JsonResponseEncoder
 
 from data.logger import create_logger
