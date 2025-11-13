@@ -14,7 +14,7 @@ from views.render import JsonResponseEncoder
 
 router = APIRouter(prefix='/api/v1/intelligence', tags=['intelligence'])
 
-logger = create_logger('dogex-intelligence')
+logger = create_logger('aigun-intelligence')
 
 
 @router.get("/")
@@ -26,24 +26,20 @@ async def get_intelligences_list(
     """
     Query intelligence list and cache subsequent page data in the background
     """
-    cache_key = f"dogex:intelligence:next_pages_data:query_params:{query_params.model_dump_json()}:user:{request.user_id}:page:{page_query.page}:page_size:{page_query.page_size}"
-
-    master_cache = request.context.mastercache.backend
-    request.user_id = getattr(request, 'user_id', None) or "anonymous"
-
-    # query the current page
+    user_id = getattr(request, 'user_id', None) or "anonymous"
+    cache_key = f"aigun:intelligence:{hash((query_params.model_dump_json(), user_id, page_query.page, page_query.page_size))}"
+    
     result, total = await list_intelligence(request, query_params, page_query.page, page_query.page_size)
-    mapping = {
-        "data": json.dumps(result, cls=JsonResponseEncoder),
-        "total": total
-    }
-
-    # Cache the current page and total
-    await master_cache.hset(name=cache_key, mapping=mapping)
-    await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
-
-
-    return APIResponse(code=code.CODE_OK, msg=msg.SUCCESS, data=result, page=page_query.page, page_size=page_query.page_size, total=total)
+    
+    # Cache with expiration in single operation
+    await request.context.mastercache.backend.hset(
+        name=cache_key,
+        mapping={"data": json.dumps(result, cls=JsonResponseEncoder), "total": total}
+    )
+    await request.context.mastercache.backend.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+    
+    return APIResponse(code=code.CODE_OK, msg=msg.SUCCESS, data=result, 
+                      page=page_query.page, page_size=page_query.page_size, total=total)
 
 
 
