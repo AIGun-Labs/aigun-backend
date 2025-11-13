@@ -355,3 +355,64 @@ async def get_highest_increase_rate_v2(request: Request, network: str, address: 
         logger.exception(f"Failed to obtain all the intelligence of the token and the maximum profit, {e}")
         max_rate = 0.0
         return max_rate
+
+
+
+async def retrieve_intelligence(request: Request, intelligence_id: str):
+
+    async with request.context.database.dogex() as session:
+
+        # Preloading relevant tables
+        entity_load_options = (
+            selectinload(IntelligenceModel.entity_intelligences)
+            .selectinload(EntityIntelligenceModel.entity)
+            .options(
+                selectinload(EntityModel.token_entity)
+                .selectinload(TokenModel.chain_datas)
+                .selectinload(TokenChainDataModel.chain),
+                selectinload(EntityModel.tokendata_entity).selectinload(
+                    TokenChainDataModel.chain
+                ),
+                selectinload(EntityModel.entity_tags),
+                selectinload(EntityModel.entity_NewsPlatform),
+                selectinload(EntityModel.exchange_platform),
+            )
+        )
+
+
+        # SQL
+        sql = (
+            select(models.IntelligenceModel)
+            .where(
+                models.IntelligenceModel.id == intelligence_id,
+                models.IntelligenceModel.is_visible == True,
+                models.IntelligenceModel.is_deleted == False,
+            )
+            .options(entity_load_options)
+        )
+
+        intelligence = (await session.execute(sql)).scalars().first()
+
+        # Intelligence does not exist
+        if intelligence is None:
+            return {}
+
+        # Get all chain information
+        chain_infos = await get_chain_infos(request, [intelligence])
+
+        # Extract entities
+        intel_dict = {
+            "intelligence": await get_intelligence_info(
+                intelligence, request, chain_infos
+            )
+        }
+
+        # The entity details of the entity intelligence association table with type author
+        for entity_intelligence in intelligence.entity_intelligences:
+            if entity_intelligence.type == "author":
+                if entity_intelligence.entity:
+                    intel_dict["entity"] = schemas.EntityResponse.model_validate(
+                        entity_intelligence.entity
+                    ).model_dump()
+
+        return intel_dict

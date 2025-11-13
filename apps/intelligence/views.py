@@ -52,3 +52,20 @@ async def get_token_info(network: str, address: str, token_type: Optional[str] =
 
     token = await retrieve_token(request, network, address)
     return APIResponse(data=token, is_pagination=False)
+
+
+
+@router.get("/intelligence/{intelligence_id}")
+async def get_intelligence_info(
+    intelligence_id: str, request=Depends(request_init(verify=False))
+):
+    """
+    intelligence detail
+    """
+
+    result = await retrieve_intelligence(request, intelligence_id)
+
+    return APIResponse(
+        code=code.CODE_OK, msg=msg.SUCCESS, data=result, is_pagination=False
+    )
+
