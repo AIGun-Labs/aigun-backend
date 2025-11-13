@@ -1,56 +1,46 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from fastapi.testclient import TestClient
-from apps.intelligence.views import router
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
-@pytest.fixture
-def mock_request():
-    request = MagicMock()
-    request.user_id = "test_user"
-    request.context.mastercache.backend.hset = AsyncMock()
-    request.context.mastercache.backend.expire = AsyncMock()
-    return request
-
-
-@pytest.fixture
-def mock_query_params():
-    params = MagicMock()
-    params.model_dump_json.return_value = '{"test": "params"}'
-    return params
-
-
-@pytest.fixture
-def mock_page_query():
-    page_query = MagicMock()
-    page_query.page = 1
-    page_query.page_size = 10
-    return page_query
-
-
-@pytest.mark.asyncio
-async def test_get_intelligences_list(mock_request, mock_query_params, mock_page_query, monkeypatch):
-    mock_list_intelligence = AsyncMock(return_value=(["test_data"], 100))
-    monkeypatch.setattr("apps.intelligence.views.list_intelligence", mock_list_intelligence)
+class TestIntelligenceViews(unittest.IsolatedAsyncioTestCase):
     
-    from apps.intelligence.views import get_intelligences_list
+    def setUp(self):
+        self.mock_request = MagicMock()
+        self.mock_request.user_id = "test_user"
+        self.mock_request.context.mastercache.backend.hset = AsyncMock()
+        self.mock_request.context.mastercache.backend.expire = AsyncMock()
+        
+        self.mock_query_params = MagicMock()
+        self.mock_query_params.model_dump_json.return_value = '{"test": "params"}'
+        
+        self.mock_page_query = MagicMock()
+        self.mock_page_query.page = 1
+        self.mock_page_query.page_size = 10
     
-    response = await get_intelligences_list(mock_query_params, mock_request, mock_page_query)
+    @patch('apps.intelligence.views.list_intelligence')
+    async def test_get_intelligences_list(self, mock_list_intelligence):
+        mock_list_intelligence.return_value = (["test_data"], 100)
+        
+        from apps.intelligence.views import get_intelligences_list
+        
+        response = await get_intelligences_list(self.mock_query_params, self.mock_request, self.mock_page_query)
+        
+        self.assertEqual(response.data, ["test_data"])
+        self.assertEqual(response.total, 100)
+        self.mock_request.context.mastercache.backend.hset.assert_called_once()
+        self.mock_request.context.mastercache.backend.expire.assert_called_once()
     
-    assert response.data == ["test_data"]
-    assert response.total == 100
-    mock_request.context.mastercache.backend.hset.assert_called_once()
-    mock_request.context.mastercache.backend.expire.assert_called_once()
+    @patch('apps.intelligence.views.retrieve_token')
+    async def test_get_token_info(self, mock_retrieve_token):
+        mock_retrieve_token.return_value = {"symbol": "BTC"}
+        
+        from apps.intelligence.views import get_token_info
+        
+        response = await get_token_info("ethereum", "0x123", None, self.mock_request)
+        
+        self.assertEqual(response.data, {"symbol": "BTC"})
+        mock_retrieve_token.assert_called_once_with(self.mock_request, "ethereum", "0x123")
 
 
-@pytest.mark.asyncio
-async def test_get_token_info(mock_request, monkeypatch):
-    mock_retrieve_token = AsyncMock(return_value={"symbol": "BTC"})
-    monkeypatch.setattr("apps.intelligence.views.retrieve_token", mock_retrieve_token)
-    
-    from apps.intelligence.views import get_token_info
-    
-    response = await get_token_info("ethereum", "0x123", None, mock_request)
-    
-    assert response.data == {"symbol": "BTC"}
-    mock_retrieve_token.assert_called_once_with(mock_request, "ethereum", "0x123")
+if __name__ == '__main__':
+    unittest.main()
