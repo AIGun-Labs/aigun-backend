@@ -416,3 +416,19 @@ async def retrieve_intelligence(request: Request, intelligence_id: str):
                     ).model_dump()
 
         return intel_dict
+
+
+async def get_intelligence_info(intelligence, request, chain_infos):
+
+    # The data of the intelligence itself
+    intelligence_info: dict = (
+        schemas.IntelligenceWithoutEntitiesOutSchema.model_validate(intelligence).model_dump()
+    )
+
+    related_tokens: Optional[List] = await get_intelligence_related_tokens(
+        intelligence, request, chain_infos
+    )
+
+    intelligence_info["entities"] = related_tokens
+
+    return intelligence_info
