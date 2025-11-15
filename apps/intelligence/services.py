@@ -475,9 +475,9 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
         warning_market_cap = (float(showed_token["warning_market_cap"]) if showed_token["warning_market_cap"] else 0)
 
         async with request.context.database.dogex() as session:
-            sql = select(entity_models.TokenChainDataModel).where(
-                entity_models.TokenChainDataModel.network == network,
-                entity_models.TokenChainDataModel.contract_address == contract_address,
+            sql = select(models.TokenChainDataModel).where(
+                models.TokenChainDataModel.network == network,
+                models.TokenChainDataModel.contract_address == contract_address,
             )
 
             token = (await session.execute(sql)).scalars().first()
@@ -504,8 +504,7 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
                     },
                     "chain": (chain_infos.get(str(token.chain_id)) if chain_infos.get(str(token.chain_id)) else chain_info),
                     "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                    "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                    "intel_version": 100
+                    "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 }
             except:
                 token_data = None
