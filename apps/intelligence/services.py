@@ -432,3 +432,89 @@ async def get_intelligence_info(intelligence, request, chain_infos):
     intelligence_info["entities"] = related_tokens
 
     return intelligence_info
+
+
+async def get_intelligence_related_tokens(intelligence, request: Request, chain_infos):
+    """
+    Obtain intelligence related tokens
+    """
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    # Chain default model
+    chain_info = {
+        "id": None,
+        "network_id": None,
+        "name": None,
+        "symbol": None,
+        "logo": None,
+    }
+
+    # search for hot data first
+    key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence.id)}"
+    related_tokens = await slave_cache.get(key)
+    if related_tokens:
+        return json.loads(related_tokens.decode("utf-8"))
+
+    entities = []
+
+    token_list = intelligence.showed_tokens
+
+    # If there is manual alignment, take the manually aligned data
+    if intelligence.adjusted_tokens is not None:
+        data =  intelligence.adjusted_tokens
+        token_list = data[-1]
+
+    if not token_list:
+        return []
+
+    for showed_token in token_list:
+        network = showed_token["slug"]
+        contract_address = showed_token["contract_address"]
+        warning_price_usd = (float(showed_token["warning_price_usd"]) if showed_token["warning_price_usd"] else 0 )
+        warning_market_cap = (float(showed_token["warning_market_cap"]) if showed_token["warning_market_cap"] else 0)
+
+        async with request.context.database.dogex() as session:
+            sql = select(entity_models.TokenChainDataModel).where(
+                entity_models.TokenChainDataModel.network == network,
+                entity_models.TokenChainDataModel.contract_address == contract_address,
+            )
+
+            token = (await session.execute(sql)).scalars().first()
+            if not token:
+                logger.error(f"The token for cooling does not exist，intelligence_id: {str(intelligence.id)}, token info：{showed_token}")
+                continue
+
+            try:
+                token_data = {
+                    "id": token.id,
+                    "entity_id": token.entity_id,
+                    "name": token.name,
+                    "symbol": token.symbol,
+                    "standard": token.standard,
+                    "decimals": token.decimals,
+                    "contract_address": token.contract_address,
+                    "logo": token.logo,
+                    "stats": {
+                        "warning_price_usd": (warning_price_usd if warning_price_usd else 0),
+                        "warning_market_cap": (warning_market_cap if warning_market_cap else 0),
+                        "current_price_usd": token.price_usd if token.price_usd else 0,
+                        "current_market_cap": (token.market_cap if token.market_cap else 0),
+                        "highest_increase_rate": 0,
+                    },
+                    "chain": (chain_infos.get(str(token.chain_id)) if chain_infos.get(str(token.chain_id)) else chain_info),
+                    "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                    "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                    "intel_version": 100
+                }
+            except:
+                token_data = None
+            entities.append(token_data)
+
+    await master_cache.set(
+        name=key,
+        value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder),
+        ex=settings.EXPIRES_FOR_SHOWED_TOKENS,
+    )
+    return entities
+
