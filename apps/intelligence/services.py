@@ -384,6 +384,59 @@ async def refresh_token_data_from_cache_v2(request: Request, data):
     return data
 
 
+async def get_showed_token_without_chain_infos(request: Request, showed_tokens: Optional[List], intelligence_id):
+    """
+    showed token data
+    """
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    # First get hot data from cache
+    key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence_id)}"
+    entities = await slave_cache.get(key)
+    if entities:
+        return json.loads(entities.decode("utf-8"))
+
+    # Compatible with empty showed_tokens situation (no cold data conversion)
+    entities = []
+
+    # The passed showed_tokens have already been filtered from adjusted_token and showed_tokens
+    if not showed_tokens:
+        return []
+
+    # showed_tokens exist (actual data that has been displayed to users after cooling down, no need to sort or filter again)
+    # Step 1: Collect all (network, contract_address) pairs that need to be queried
+    token_keys = [(showed_token["slug"], showed_token["contract_address"]) for showed_token in showed_tokens]
+
+    # Step 2: Batch query all tokens (one database query)
+    async with request.context.database.dogex() as session:
+        # Build OR conditions to match all tokens
+        conditions = [
+            and_(
+                models.TokenChainDataModel.network == network,
+                models.TokenChainDataModel.contract_address == contract_address
+            )
+            for network, contract_address in token_keys
+        ]
+
+        sql = select(models.TokenChainDataModel).where(
+            or_(*conditions)
+        ).options(
+            selectinload(models.TokenChainDataModel.chain)
+        )
+
+        tokens = (await session.execute(sql)).scalars().all()
+
+        # Step 3: Build lookup dictionary with key as (network, contract_address)
+        token_dict = {
+            (token.network, token.contract_address): token
+            for token in tokens
+        }
+
+        # todo Step 4: Traverse showed_token and retrieve the corresponding token data from the dictionary
+        pass
+
+
 
 async def retrieve_token(request: Request, network: str, address: str):
 
