@@ -1,4 +1,5 @@
 import json
+import decimal
 from typing import Optional, List
 
 from sqlalchemy import select
@@ -9,14 +10,12 @@ from sqlalchemy.orm import selectinload
 from apps.intelligence import schemas
 from apps.websocket import services as ws_services
 from data import create_logger
-
 from middleware import Request
 from sqlalchemy import and_, or_
 from sqlalchemy import cast, String
-
 from sqlalchemy.orm import defer
-
 from views.render import JsonResponseEncoder
+
 
 logger = create_logger("dogex-intelligence")
 
@@ -299,12 +298,7 @@ async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_
         key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence_id)}"
 
         cache_data  = await slave_cache.get(key)
-        if cache_data:
-            cache_data = json.loads(cache_data.decode("utf-8"))
-        else:
-            cache_data = await slave_cache_test.get(key)
-            if cache_data:
-                cache_data = json.loads(cache_data.decode("utf-8"))
+
 
         data_dict[key] = cache_data
 
@@ -353,6 +347,41 @@ async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_
 
         return await refresh_token_data_from_cache_v2(request, data)
 
+
+async def refresh_token_data_from_cache_v2(request: Request, data):
+    """
+    Only perform real-time queries for tokens within the visible screen
+    """
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    for key, token_list in data.items():
+
+        refreshed_token_list = []
+        # Get each token data from cache
+        for token in token_list:
+            network = token.get("chain", {}).get("slug", "")
+            address = token.get("contract_address", "")
+
+            # Get cached token data
+            token_cache_key = f"token:network:{network}:address:{address}"
+
+            token_data = await slave_cache.get(token_cache_key)
+            if token_data:
+                token_data = json.loads(token_data.decode("utf-8"), parse_float=decimal.Decimal)
+
+                # Update token data
+                token["stats"]["current_price_usd"] = token_data.get("price_usd") if token_data.get("price_usd") else token["stats"]["current_price_usd"]
+                token["stats"]["current_market_cap"] = token_data.get("market_cap") if token_data.get("market_cap") else token["stats"]["current_market_cap"]
+                token["stats"]["liquidity"] = token_data.get("liquidity") if token_data.get("liquidity") else token["stats"]["liquidity"]
+                token["stats"]["volume_24h"] = token_data.get("volume_24h") if token_data.get("volume_24h") else token["stats"]["volume_24h"]
+
+
+            refreshed_token_list.append(token)
+
+        data[key] = refreshed_token_list
+
+    return data
 
 
 

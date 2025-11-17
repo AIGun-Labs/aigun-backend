@@ -40,6 +40,7 @@ class IntelligenceModel(Base):
     showed_tokens = Column(JSONB, nullable=True)
     spider_time = Column(DateTime(timezone=True))
     push_time = Column(DateTime(timezone=True))
+    adjusted_tokens = Column(JSONB)
 
     # Logical foreign key
     entity_intelligences = relationship("EntityIntelligenceModel", back_populates="intelligence", lazy="select",
