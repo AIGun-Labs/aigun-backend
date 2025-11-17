@@ -287,6 +287,74 @@ async def get_showed_tokens_info(request: Request, showed_tokens: Optional[List]
     return entities
 
 
+async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_list: list[str]):
+    """
+    Get real-time token data for intelligence
+    """
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    data_dict = {}
+    for intelligence_id in intelligence_id_list:
+        key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence_id)}"
+
+        cache_data  = await slave_cache.get(key)
+        if cache_data:
+            cache_data = json.loads(cache_data.decode("utf-8"))
+        else:
+            cache_data = await slave_cache_test.get(key)
+            if cache_data:
+                cache_data = json.loads(cache_data.decode("utf-8"))
+
+        data_dict[key] = cache_data
+
+    result = data_dict
+
+    data = {}
+    showed_token_intelligence_id_list = []  # Intelligence that needs to be checked back through showed_token
+
+    for key, val in result.items():
+        intel_id = key.strip().rsplit(":", maxsplit=1)[-1]
+        if not val:
+            showed_token_intelligence_id_list.append(intel_id)
+            continue
+        # val = json.loads(val.decode("utf-8"))
+        data[intel_id] = val
+
+    # Check back the showed_token field of the intelligence list
+    async with request.context.database.dogex() as session:
+        sql = select(
+            models.IntelligenceModel.id,
+            models.IntelligenceModel.showed_tokens,
+            models.IntelligenceModel.adjusted_tokens
+        ).where(
+            models.IntelligenceModel.id.in_(showed_token_intelligence_id_list)
+        )
+
+        # Batch get showed_token
+        result = (await session.execute(sql)).mappings().all()
+        if not result:
+            return await refresh_token_data_from_cache_v2(request, data)
+
+        # Convert to serializable types
+        result = [dict(item) for item in result]
+
+        for intel_data in result:
+            intel_id = intel_data["id"]
+            showed_tokens = intel_data["showed_tokens"]
+            adjusted_tokens = intel_data["adjusted_tokens"]
+
+            if adjusted_tokens is not None:
+                showed_tokens = adjusted_tokens[-1]
+
+            showed_token_infos = await get_showed_token_without_chain_infos(request, showed_tokens, intel_id)
+
+            data[intel_id] = showed_token_infos
+
+        return await refresh_token_data_from_cache_v2(request, data)
+
+
+
 
 async def retrieve_token(request: Request, network: str, address: str):
 
@@ -516,4 +584,5 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
         ex=settings.EXPIRES_FOR_SHOWED_TOKENS,
     )
     return entities
+
 

@@ -42,10 +42,20 @@ async def get_intelligences_list(
                       page=page_query.page, page_size=page_query.page_size, total=total)
 
 
+@router.get("/entities")
+async def list_intelligence_latest_entity(intelligence_ids: str,  request=Depends(request_init(verify=False, limiter=True))):
+    """
+    Get the latest associated token data
+    """
+    intelligence_ids = intelligence_ids.strip().split(",")
+
+    entity_list = await get_intelligence_latest_entities_v2(request, intelligence_ids)
+    return APIResponse(data=entity_list)
+
+
 
 @router.get("/token/info")
-async def get_token_info(network: str, address: str, token_type: Optional[str] = None,
-                         request=Depends(request_init(verify=False, limiter=False))):
+async def get_token_info(network: str, address: str, request=Depends(request_init(verify=False, limiter=False))):
     """
     Get token details
     """
