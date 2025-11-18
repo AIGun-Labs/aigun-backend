@@ -494,6 +494,28 @@ async def get_showed_token_without_chain_infos(request: Request, showed_tokens: 
         await master_cache.set(name=key, value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_SHOWED_TOKENS)
         return entities
 
+async def cache_intelligence_next_pages(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int, page_to_cache: int):
+    """
+    Cache the intelligence data for the next page
+    """
+    master_cache = request.context.mastercache.backend
+
+    for cache_page in range(page+1, page + page_to_cache):
+        cache_key = f"dogex:intelligence:next_pages_data:query_params:{query_params.model_dump_json()}:page:{cache_page}:page_size:{page_size}"
+
+        if await master_cache.exists(cache_key):
+            continue
+
+        result, total = await list_intelligence(request, query_params, cache_page, page_size)
+
+
+        mapping = {
+            "data": json.dumps(result, cls=JsonResponseEncoder),
+            "total": total
+        }
+
+        await master_cache.hset(name=cache_key, mapping=mapping)
+        await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
 
 
 async def retrieve_token(request: Request, network: str, address: str):
