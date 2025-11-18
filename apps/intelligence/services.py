@@ -434,7 +434,65 @@ async def get_showed_token_without_chain_infos(request: Request, showed_tokens: 
         }
 
         # todo Step 4: Traverse showed_token and retrieve the corresponding token data from the dictionary
-        pass
+        for showed_token in showed_tokens:
+            network = showed_token["slug"]
+            contract_address = showed_token["contract_address"]
+            warning_price_usd = float(showed_token["warning_price_usd"])
+            warning_market_cap = float(showed_token["warning_market_cap"])
+
+            try:
+                liquidity = float(showed_token["liquidity"])
+            except:
+                liquidity = 0
+            try:
+                volume_24h = float(showed_token["volume_24h"])
+            except:
+                volume_24h = 0
+
+            # Find the token from the dictionary
+            token = token_dict.get((network, contract_address))
+
+            if not token:
+                logger.error(
+                    f"The token in showed_token does not exist，intelligence_id: {str(intelligence_id)}, token info：{showed_token}")
+                continue
+            try:
+                token_data = {
+                    "id": token.id,
+                    "entity_id": token.entity_id,
+                    "name": token.name,
+                    "symbol": token.symbol,
+                    "standard": token.standard,
+                    "decimals": token.decimals,
+                    "contract_address": token.contract_address,
+                    "logo": token.logo,
+                    "stats": {
+                        "warning_price_usd": warning_price_usd if warning_price_usd else 0,
+                        "warning_market_cap": warning_market_cap if warning_market_cap else 0,
+                        "current_price_usd": token.price_usd if token.price_usd else 0,
+                        "current_market_cap": token.market_cap if token.market_cap else 0,
+                        "liquidity": token.liquidity if token.liquidity else 0,
+                        "volume_24h": token.volume_24h if token.volume_24h else 0,
+                        "highest_increase_rate": "0"
+                    },
+                    "chain": {
+                        "id": token.chain.id,
+                        "network_id": token.chain.network_id,
+                        "name": token.chain.name,
+                        "symbol": token.chain.symbol,
+                        "slug": token.chain.slug,
+                        "logo": token.chain.logo
+                    },
+                    "created_at": token.created_at,
+                    "updated_at": token.updated_at,
+                    "intel_version": 100
+                }
+            except:
+                token_data = None
+            entities.append(token_data)
+        # cold to hot
+        await master_cache.set(name=key, value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_SHOWED_TOKENS)
+        return entities
 
 
 
