@@ -628,54 +628,37 @@ async def get_intelligence_info(intelligence, request, chain_infos):
 
 
 async def get_intelligence_related_tokens(intelligence, request: Request, chain_infos):
-    """
-    Obtain intelligence related tokens
-    """
-    master_cache = request.context.mastercache.backend
-    slave_cache = request.context.slavecache.backend
+    """Get intelligence related tokens with caching"""
+    cache_key = f"dogex:intelligence:latest_entities:intelligence_id:{intelligence.id}"
 
-    # Chain default model
-    chain_info = {
-        "id": None,
-        "network_id": None,
-        "name": None,
-        "symbol": None,
-        "logo": None,
-    }
+    # Check cache first
+    cached_tokens = await request.context.slavecache.backend.get(cache_key)
+    if cached_tokens:
+        return json.loads(cached_tokens.decode("utf-8"))
 
-    # search for hot data first
-    key = f"dogex:intelligence:latest_entities:intelligence_id:{str(intelligence.id)}"
-    related_tokens = await slave_cache.get(key)
-    if related_tokens:
-        return json.loads(related_tokens.decode("utf-8"))
-
-    entities = []
-
-    token_list = intelligence.showed_tokens
-
-    # If there is manual alignment, take the manually aligned data
-    if intelligence.adjusted_tokens is not None:
-        data =  intelligence.adjusted_tokens
-        token_list = data[-1]
-
+    # Get token list (prefer adjusted_tokens if available)
+    token_list = intelligence.adjusted_tokens[-1] if intelligence.adjusted_tokens else intelligence.showed_tokens
     if not token_list:
         return []
 
-    for showed_token in token_list:
-        network = showed_token["slug"]
-        contract_address = showed_token["contract_address"]
-        warning_price_usd = (float(showed_token["warning_price_usd"]) if showed_token["warning_price_usd"] else 0 )
-        warning_market_cap = (float(showed_token["warning_market_cap"]) if showed_token["warning_market_cap"] else 0)
+    entities = []
+    default_chain_info = {"id": None, "network_id": None, "name": None, "symbol": None, "logo": None}
 
-        async with request.context.database.dogex() as session:
+    async with request.context.database.dogex() as session:
+        for showed_token in token_list:
+            network = showed_token["slug"]
+            contract_address = showed_token["contract_address"]
+            warning_price_usd = float(showed_token.get("warning_price_usd") or 0)
+            warning_market_cap = float(showed_token.get("warning_market_cap") or 0)
+
             sql = select(models.TokenChainDataModel).where(
                 models.TokenChainDataModel.network == network,
-                models.TokenChainDataModel.contract_address == contract_address,
+                models.TokenChainDataModel.contract_address == contract_address
             )
 
             token = (await session.execute(sql)).scalars().first()
             if not token:
-                logger.error(f"The token for cooling does not exist，intelligence_id: {str(intelligence.id)}, token info：{showed_token}")
+                logger.error(f"Token not found for intelligence {intelligence.id}: {showed_token}")
                 continue
 
             try:
@@ -689,25 +672,27 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
                     "contract_address": token.contract_address,
                     "logo": token.logo,
                     "stats": {
-                        "warning_price_usd": (warning_price_usd if warning_price_usd else 0),
-                        "warning_market_cap": (warning_market_cap if warning_market_cap else 0),
-                        "current_price_usd": token.price_usd if token.price_usd else 0,
-                        "current_market_cap": (token.market_cap if token.market_cap else 0),
-                        "highest_increase_rate": 0,
+                        "warning_price_usd": warning_price_usd,
+                        "warning_market_cap": warning_market_cap,
+                        "current_price_usd": token.price_usd or 0,
+                        "current_market_cap": token.market_cap or 0,
+                        "highest_increase_rate": 0
                     },
-                    "chain": (chain_infos.get(str(token.chain_id)) if chain_infos.get(str(token.chain_id)) else chain_info),
+                    "chain": chain_infos.get(str(token.chain_id), default_chain_info),
                     "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                     "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 }
-            except:
-                token_data = None
-            entities.append(token_data)
+                entities.append(token_data)
+            except Exception as e:
+                logger.error(f"Error processing token {contract_address}: {e}")
 
-    await master_cache.set(
-        name=key,
+    # Cache result
+    await request.context.mastercache.backend.set(
+        name=cache_key,
         value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder),
-        ex=settings.EXPIRES_FOR_SHOWED_TOKENS,
+        ex=settings.EXPIRES_FOR_SHOWED_TOKENS
     )
+
     return entities
 
 
