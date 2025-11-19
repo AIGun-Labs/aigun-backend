@@ -434,7 +434,7 @@ async def get_showed_token_without_chain_infos(request: Request, showed_tokens: 
             for token in tokens
         }
 
-        # todo Step 4: Traverse showed_token and retrieve the corresponding token data from the dictionary
+        # Step 4: Traverse showed_token and retrieve the corresponding token data from the dictionary
         for showed_token in showed_tokens:
             network = showed_token["slug"]
             contract_address = showed_token["contract_address"]
@@ -575,79 +575,54 @@ async def get_highest_increase_rate_v2(request: Request, network: str, address: 
         return 0.0
 
 
-
 async def retrieve_intelligence(request: Request, intelligence_id: str):
-
     async with request.context.database.dogex() as session:
-
-        # Preloading relevant tables
-        entity_load_options = (
-            selectinload(IntelligenceModel.entity_intelligences)
-            .selectinload(EntityIntelligenceModel.entity)
-            .options(
-                selectinload(EntityModel.token_entity)
-                .selectinload(TokenModel.chain_datas)
-                .selectinload(TokenChainDataModel.chain),
-                selectinload(EntityModel.tokendata_entity).selectinload(
-                    TokenChainDataModel.chain
-                ),
-                selectinload(EntityModel.entity_tags),
-                selectinload(EntityModel.entity_NewsPlatform),
-                selectinload(EntityModel.exchange_platform),
-            )
+        entity_load_options = selectinload(
+            IntelligenceModel.entity_intelligences
+        ).selectinload(
+            EntityIntelligenceModel.entity
+        ).options(
+            selectinload(EntityModel.token_entity).selectinload(TokenModel.chain_datas).selectinload(
+                TokenChainDataModel.chain),
+            selectinload(EntityModel.tokendata_entity).selectinload(TokenChainDataModel.chain),
+            selectinload(EntityModel.entity_tags),
+            selectinload(EntityModel.entity_NewsPlatform),
+            selectinload(EntityModel.exchange_platform)
         )
 
-
-        # SQL
-        sql = (
-            select(models.IntelligenceModel)
-            .where(
-                models.IntelligenceModel.id == intelligence_id,
-                models.IntelligenceModel.is_visible == True,
-                models.IntelligenceModel.is_deleted == False,
-            )
-            .options(entity_load_options)
-        )
+        sql = select(models.IntelligenceModel).where(
+            models.IntelligenceModel.id == intelligence_id,
+            models.IntelligenceModel.is_visible == True,
+            models.IntelligenceModel.is_deleted == False
+        ).options(entity_load_options)
 
         intelligence = (await session.execute(sql)).scalars().first()
-
-        # Intelligence does not exist
-        if intelligence is None:
+        if not intelligence:
             return {}
 
-        # Get all chain information
         chain_infos = await get_chain_infos(request, [intelligence])
 
-        # Extract entities
-        intel_dict = {
-            "intelligence": await get_intelligence_info(
-                intelligence, request, chain_infos
-            )
+        result = {
+            "intelligence": await get_intelligence_info(intelligence, request, chain_infos)
         }
 
-        # The entity details of the entity intelligence association table with type author
+        # Find author entity
         for entity_intelligence in intelligence.entity_intelligences:
-            if entity_intelligence.type == "author":
-                if entity_intelligence.entity:
-                    intel_dict["entity"] = schemas.EntityResponse.model_validate(
-                        entity_intelligence.entity
-                    ).model_dump()
+            if entity_intelligence.type == "author" and entity_intelligence.entity:
+                result["entity"] = schemas.EntityResponse.model_validate(entity_intelligence.entity).model_dump()
+                break
 
-        return intel_dict
+        return result
 
 
 async def get_intelligence_info(intelligence, request, chain_infos):
+    intelligence_info = schemas.IntelligenceWithoutEntitiesOutSchema.model_validate(
+        intelligence
+    ).model_dump()
 
-    # The data of the intelligence itself
-    intelligence_info: dict = (
-        schemas.IntelligenceWithoutEntitiesOutSchema.model_validate(intelligence).model_dump()
-    )
-
-    related_tokens: Optional[List] = await get_intelligence_related_tokens(
+    intelligence_info["entities"] = await get_intelligence_related_tokens(
         intelligence, request, chain_infos
     )
-
-    intelligence_info["entities"] = related_tokens
 
     return intelligence_info
 
@@ -734,5 +709,6 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
         ex=settings.EXPIRES_FOR_SHOWED_TOKENS,
     )
     return entities
+
 
 
