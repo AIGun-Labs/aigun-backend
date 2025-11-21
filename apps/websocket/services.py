@@ -10,7 +10,7 @@ from datetime import datetime
 from views.render import JsonResponseEncoder
 
 
-logger = create_logger('dogex-intelligence-ws')
+logger = create_logger('aigun-intelligence-ws')
 
 
 def remove_part_info(intelligence):
@@ -23,108 +23,83 @@ def remove_part_info(intelligence):
 
 
 async def get_author_info(intelligence, context):
-    slave_cache = context.slavecache.backend
-    master_cache = context.mastercache.backend
-
-    intelligence_subtype = intelligence["subtype"]
+    intelligence_id = intelligence["id"] if isinstance(intelligence, dict) else intelligence.id
+    cache_key = f"aigun:intelligence:author_info:intelligence_id:{intelligence_id}"
 
     # Check cache
-    author_info = await slave_cache.get(f"dogex:intelligence:author_info:intelligence_id:{str(intelligence["id"])}")
-    if author_info is not None:
-        await master_cache.expire(name=f"dogex:intelligence:author_info:intelligence_id:{str(intelligence["id"])}", time=settings.EXPIRES_FOR_AUTHOR_INFO)
-        return json.loads(author_info.decode("utf-8"))
+    cached_info = await context.slavecache.backend.get(cache_key)
+    if cached_info:
+        await context.mastercache.backend.expire(name=cache_key, time=settings.EXPIRES_FOR_AUTHOR_INFO)
+        return json.loads(cached_info.decode("utf-8"))
 
-    # Query database
-    if isinstance(intelligence, dict):
-        intelligence_id = intelligence["id"]
-    else:
-        intelligence_id = intelligence.id
-
-    author_info = {
-        "platform": {
-            "id": None,
-            "name": None,
-            "logo": None
-        },
+    default_author_info = {
+        "platform": {"id": None, "name": None, "logo": None},
         "slug": None,
         "avatar": None,
         "action": None
     }
 
     async with context.database.dogex() as session:
-        sql = select(
-            models.IntelligenceModel
-        ).where(
+        sql = select(models.IntelligenceModel).where(
             models.IntelligenceModel.id == intelligence_id
         ).options(
-            selectinload(
-                models.IntelligenceModel.entity_intelligences
-            ).selectinload(
-                models.EntityIntelligenceModel.entity
-            ).selectinload(
-                models.EntityModel.entity_datasources
-            ).selectinload(
-                models.EntityDatasource.account
-            )
+            selectinload(models.IntelligenceModel.entity_intelligences)
+            .selectinload(models.EntityIntelligenceModel.entity)
+            .selectinload(models.EntityModel.entity_datasources)
+            .selectinload(models.EntityDatasource.account)
         )
 
-        intelligence = (await session.execute(sql)).scalars().first()
+        intel = (await session.execute(sql)).scalars().first()
+        if not intel or not intel.entity_intelligences:
+            return default_author_info
 
-        # Filter entities with type 'author'
-        if intelligence and intelligence.entity_intelligences:
-            for entity_intelligence in intelligence.entity_intelligences:
-                if entity_intelligence.type == "author":
+        # Find author entity
+        for entity_intelligence in intel.entity_intelligences:
+            if entity_intelligence.type != "author" or not entity_intelligence.master_id:
+                continue
 
-                    account_id = entity_intelligence.master_id
-                    if not account_id:
-                        return author_info
+            account = (await session.execute(
+                select(models.AccountModel).where(models.AccountModel.id == entity_intelligence.master_id)
+            )).scalars().first()
 
-                    sql = select(
-                        models.AccountModel
-                    ).where(
-                        models.AccountModel.id == account_id
+            if not account:
+                logger.error(f"Account not found: {entity_intelligence.master_id} for intelligence {intelligence_id}")
+                continue
+
+            platform_name = (entity_intelligence.master_type.strip().split(",", 1)[0][1:]
+                             if entity_intelligence.master_type else "twitter")
+
+            data = {
+                "platform": {
+                    "id": account.id,
+                    "name": platform_name,
+                    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/960px-X_logo.jpg?20230724061250"
+                },
+                "slug": account.screen_name,
+                "avatar": account.avatar,
+                "prompt": None
+            }
+
+            # Add prompt for twitter
+            if intel.type == "twitter":
+                try:
+                    description = ws_schemas.twitter_action_prompt_mapping.get(
+                        intelligence.get("subtype") if isinstance(intelligence, dict) else intel.subtype,
+                        "'s new release on X has sparked investment opportunities."
                     )
+                    data["prompt"] = account.name + description
+                except:
+                    pass
 
-                    account = (await session.execute(sql)).scalars().first()
-                    if not account:
-                        logger.error(f"No corresponding account data for intelligence, account_id:{account_id}, intelligence_id:{intelligence_id}")
-                        return author_info
+            # Cache and return
+            await context.mastercache.backend.set(
+                name=cache_key,
+                value=json.dumps(data, ensure_ascii=False, cls=JsonResponseEncoder),
+                ex=settings.EXPIRES_FOR_AUTHOR_INFO
+            )
+            return data
 
-                    name = entity_intelligence.master_type.strip().split(",", maxsplit=1)[0][1:] if entity_intelligence.master_type else "twitter"
-
-                    logo_mapping = {
-                        "twitter": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/960px-X_logo.jpg?20230724061250"
-                    }
-
-                    data = {
-                        "platform": {
-                            "id": account.id,
-                            "name": name,
-                            "logo": logo_mapping[name]
-                        },
-                        "slug": account.screen_name,
-                        "avatar": account.avatar,
-                        "prompt": None
-                    }
-
-                    # Supplement operation type prompt
-                    try:
-                        if intelligence.type == "twitter":
-                            author_name = account.name
-                            # action = ws_schemas.twitter_action_prompt_mapping[intelligence.subtype]
-                            # end = ws_schemas.is_valuable_end_prompt_mapping[intelligence.is_valuable]
-                            try:
-                                description = ws_schemas.twitter_action_prompt_mapping[intelligence_subtype]
-                            except KeyError:
-                                description = "'s new release on X has sparked investment opportunities."
-
-                            data["prompt"] = author_name + description
-                    except:
-                        pass
-
-                    await master_cache.set(name=f"dogex:intelligence:author_info:intelligence_id:{str(intelligence.id)}", value=json.dumps(data, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_AUTHOR_INFO)
-
-                    return data
+    return default_author_info
 
 
 
