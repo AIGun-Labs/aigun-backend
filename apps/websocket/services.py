@@ -102,23 +102,32 @@ async def get_author_info(intelligence, context):
     return default_author_info
 
 
-
 async def get_monitor_time(created_at, published_at):
     """
-    Returns milliseconds
+    Calculate monitor time in milliseconds between created_at and published_at
+
+    Args:
+        created_at: Creation timestamp (string ISO format or datetime object)
+        published_at: Publication timestamp (string ISO format or datetime object)
+
+    Returns:
+        int: Monitor time in milliseconds (positive if created after published)
     """
-    monitor_time = 0
+    try:
+        # Handle string inputs
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        if isinstance(published_at, str):
+            published_at = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
 
-    if isinstance(created_at, str):
-        published_at = int(datetime.fromisoformat(published_at).timestamp() * 1000)
-        created_at = int(datetime.fromisoformat(created_at).timestamp() * 1000)
+        # Ensure both are datetime objects
+        if isinstance(created_at, datetime) and isinstance(published_at, datetime):
+            return int((created_at - published_at).total_seconds() * 1000)
 
-        monitor_time = created_at - published_at
-
-    elif isinstance(created_at, datetime):
-        monitor_time = int((created_at - published_at).total_seconds() * 1000)
-
-    return monitor_time
+        return 0
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to calculate monitor time: {e}")
+        return 0
 
 
 async def get_all_chain_info(intelligence, context):
