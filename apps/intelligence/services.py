@@ -676,7 +676,9 @@ async def get_intelligence_related_tokens(intelligence, request: Request, chain_
                         "warning_market_cap": warning_market_cap,
                         "current_price_usd": token.price_usd or 0,
                         "current_market_cap": token.market_cap or 0,
-                        "highest_increase_rate": 0
+                        "highest_increase_rate": 0,
+                        "liquidity": token.liquidity,
+                        "volume_24h": token.volume_24h
                     },
                     "chain": chain_infos.get(str(token.chain_id), default_chain_info),
                     "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
