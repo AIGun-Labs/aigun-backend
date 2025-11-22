@@ -554,25 +554,38 @@ async def get_showed_token_without_chain_infos(request: Request, showed_tokens: 
             except:
                 token_data = None
             entities.append(token_data)
+
         # cold to hot
         await master_cache.set(name=key, value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder), ex=settings.EXPIRES_FOR_SHOWED_TOKENS)
         return entities
 
-async def cache_intelligence_next_pages(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int, page_to_cache: int):
+
+async def cache_intelligence_next_pages(request: Request, query_params: schemas.IntelligenceQueryParams, page: int,
+                                        page_size: int, page_to_cache: int):
     """
-    Cache the intelligence data for the next page
+    Cache intelligence data for subsequent pages to improve performance
+
+    Args:
+        request: HTTP request containing context information
+        query_params: Query parameters for filtering intelligence data
+        page: Current page number
+        page_size: Number of items per page
+        page_to_cache: Number of subsequent pages to cache
     """
     master_cache = request.context.mastercache.backend
 
-    for cache_page in range(page+1, page + page_to_cache):
-        cache_key = f"aigun:intelligence:next_pages_data:query_params:{query_params.model_dump_json()}:page:{cache_page}:page_size:{page_size}"
+    # Cache data for the next 'page_to_cache' pages
+    for next_page in range(page + 1, page + page_to_cache + 1):
+        cache_key = f"aigun:intelligence:next_pages_data:query_params:{query_params.model_dump_json()}:page:{next_page}:page_size:{page_size}"
 
+        # Skip if already cached
         if await master_cache.exists(cache_key):
             continue
 
-        result, total = await list_intelligence(request, query_params, cache_page, page_size)
+        # Fetch intelligence data for the page
+        result, total = await list_intelligence(request, query_params, next_page, page_size)
 
-
+        # Store in cache
         mapping = {
             "data": json.dumps(result, cls=JsonResponseEncoder),
             "total": total
