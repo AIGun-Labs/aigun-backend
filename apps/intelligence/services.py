@@ -43,98 +43,161 @@ def _build_filters(query_params: schemas.IntelligenceQueryParams) -> List:
     
     return filters
 
+
 async def list_intelligence(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int):
     """
-    Get intelligence list
+    Get intelligence list with pagination and filtering support
+
+    Args:
+        request: HTTP request containing context information
+        query_params: Query parameters for filtering intelligence data
+        page: Page number (starting from 1)
+        page_size: Number of items per page
+
+    Returns:
+        tuple: (intelligence_list, total_count)
     """
+    # Initialize context and pagination
     master_cache = request.context.mastercache.backend
     offset = (page - 1) * page_size
-    
-    # Build filters
+
+    # Build query filters
     filters = _build_filters(query_params)
     filters.extend([
         IntelligenceModel.is_deleted == False,
         IntelligenceModel.is_visible == True
     ])
 
-    # Preload related tables
+    # Configure entity preloading options
     entity_load_options = selectinload(
         IntelligenceModel.entity_intelligences
     ).selectinload(
         EntityIntelligenceModel.entity
     ).options(
-        selectinload(EntityModel.token_entity).selectinload(TokenModel.chain_datas).selectinload(TokenChainDataModel.chain),
-        selectinload(EntityModel.tokendata_entity).selectinload(TokenChainDataModel.chain),
+        selectinload(EntityModel.token_entity)
+        .selectinload(TokenModel.chain_datas)
+        .selectinload(TokenChainDataModel.chain),
+        selectinload(EntityModel.tokendata_entity)
+        .selectinload(TokenChainDataModel.chain),
         selectinload(EntityModel.entity_tags),
         selectinload(EntityModel.entity_NewsPlatform),
         selectinload(EntityModel.exchange_platform)
     )
 
     async with request.context.database.dogex() as session:
-        # Base query
-        sql = select(IntelligenceModel)
+        # Construct base query
+        base_query = select(IntelligenceModel)
 
-        # Influence level filter
+        # Apply influence level filter if specified
         if hasattr(query_params, 'influence_level') and query_params.influence_level is not None:
-            sql = sql.join(IntelligenceModel.entity_intelligences).join(EntityIntelligenceModel.entity)
+            base_query = base_query.join(
+                IntelligenceModel.entity_intelligences
+            ).join(
+                EntityIntelligenceModel.entity
+            )
             filters.append(and_(
                 EntityIntelligenceModel.type == "author",
                 EntityModel.influence_level == query_params.influence_level
             ))
 
-        # Get total count from cache
+        # Handle total count with caching
         cache_key = f"dogex:intelligence:intelligence_list:count:query_params:{query_params.model_dump_json()}"
-        total_cached = await master_cache.get(cache_key)
-        
-        if total_cached is not None:
-            total = int(total_cached.decode("utf-8")) if total_cached.decode("utf-8") else 0
-        else:
-            # Count total
-            count_query = sql.where(*filters).options(defer(IntelligenceModel.extra_datas)).distinct()
-            total_count_sql = select(func.count()).select_from(count_query.subquery())
-            total = (await session.execute(total_count_sql)).scalar()
-            await master_cache.set(name=cache_key, value=total, ex=3600 * 6)
+        total_count = await _get_cached_total_count(
+            master_cache, session, base_query, filters, cache_key
+        )
 
-        # Query SQL
-        sql = sql.where(*filters).options(
-            defer(IntelligenceModel.extra_datas), 
-            entity_load_options
-        ).order_by(
-            IntelligenceModel.published_at.desc()
-        ).offset(offset).limit(page_size).distinct()
+        # Execute main query with pagination
+        results = await _execute_intelligence_query(
+            session, base_query, filters, entity_load_options,
+            offset, page_size
+        )
 
-        intelligences = (await session.execute(sql)).scalars().all()
+    # Post-process results
+    processed_results = await _process_intelligence_results(
+        request, results, query_params
+    )
 
-    # Get chain information for all tokens associated with all intelligence items
+    return processed_results, total_count
+
+
+async def _get_cached_total_count(master_cache, session, base_query, filters, cache_key):
+    """Get total count from cache or database"""
+    cached_total = await master_cache.get(cache_key)
+
+    if cached_total is not None:
+        return int(cached_total.decode("utf-8")) if cached_total.decode("utf-8") else 0
+
+    # Calculate and cache total count
+    count_query = base_query.where(*filters).options(
+        defer(IntelligenceModel.extra_datas)
+    ).distinct()
+
+    total_count_sql = select(func.count()).select_from(count_query.subquery())
+    total_count = (await session.execute(total_count_sql)).scalar()
+
+    await master_cache.set(name=cache_key, value=total_count, ex=3600 * 6)
+    return total_count
+
+
+async def _execute_intelligence_query(session, base_query, filters, load_options, offset, limit):
+    """Execute the main intelligence query with pagination"""
+    query = base_query.where(*filters).options(
+        defer(IntelligenceModel.extra_datas),
+        load_options
+    ).order_by(
+        IntelligenceModel.published_at.desc()
+    ).offset(offset).limit(limit).distinct()
+
+    return (await session.execute(query)).scalars().all()
+
+
+async def _process_intelligence_results(request, intelligences, query_params):
+    """Process intelligence results and enrich with additional data"""
+    # Fetch chain information for all tokens
     chain_infos = await get_chain_infos(request, intelligences)
 
-    # Process results in batch
-    result = []
+    # Prepare shared data
     ai_agent_info = {
         "avatar": "image/h0bk-B4SP5-3nqM8JpjEXSW9u2dXcDbKGGAvI8m7GIgXPC4J_Yp5dZMKC8TPFb2lrZZPBuF3wCOyvWU091MujA==",
         "name": {"en": "Event Hunter", "zh": "Event Hunter"}
     }
-    
-    for intelligence in intelligences:
-        intelligence_info = schemas.IntelligenceListOutSchema.model_validate(intelligence).model_dump()
 
-        # Supplement displayed associated tokens
+    # Process each intelligence item
+    processed_results = []
+    for intelligence in intelligences:
+        # Validate and convert intelligence data
+        intelligence_info = schemas.IntelligenceListOutSchema.model_validate(
+            intelligence
+        ).model_dump()
+
+        # Enrich with token information
         intelligence_info["entities"] = await get_showed_tokens_info(
-            request, intelligence_info["showed_tokens"], chain_infos, intelligence
+            request,
+            intelligence_info.get("showed_tokens", []),
+            chain_infos,
+            intelligence
         )
 
-        # Supplement author and monitor_time fields
-        intelligence_info["author"] = await ws_services.get_author_info(intelligence_info, request.context)
+        # Add supplementary information
+        intelligence_info["author"] = await ws_services.get_author_info(
+            intelligence_info,
+            request.context
+        )
         intelligence_info["monitor_time"] = await ws_services.get_monitor_time(
-            intelligence_info["spider_time"], intelligence_info["published_at"]
+            intelligence_info.get("spider_time"),
+            intelligence_info.get("published_at")
         )
         intelligence_info["ai_agent"] = ai_agent_info
 
-        # Remove showed_tokens from response
+        # Clean up temporary fields
         intelligence_info.pop("showed_tokens", None)
-        result.append(intelligence_info)
+        processed_results.append(intelligence_info)
 
-    return result, total
+    return processed_results
+
+
+
+
 
 async def get_chain_infos(request: Request, intelligences: List) -> Dict[str, Any]:
     """Get chain information for all tokens associated with intelligence items"""
