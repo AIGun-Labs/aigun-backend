@@ -1,5 +1,6 @@
 import json
 import decimal
+import asyncio
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, func, and_, or_, cast, String
@@ -18,6 +19,46 @@ import settings
 
 
 logger = create_logger("dogex-intelligence")
+
+
+async def cache_page(request: Request, query_params, page: int, page_size: int):
+    """Cache a single page with lock protection"""
+    cache_key = f"aigun:intelligence:page:{query_params.model_dump_json()}:{page}:{page_size}"
+    
+    if await request.context.slavecache.backend.exists(cache_key):
+        return
+    
+    lock_key = f"{cache_key}:lock"
+    if await request.context.mastercache.backend.set(lock_key, "1", ex=10, nx=True):
+        try:
+            result, total = await list_intelligence(request, query_params, page, page_size)
+            await request.context.mastercache.backend.hset(
+                cache_key,
+                mapping={"data": json.dumps(result, cls=JsonResponseEncoder), "total": total}
+            )
+            await request.context.mastercache.backend.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+        finally:
+            await request.context.mastercache.backend.delete(lock_key)
+
+
+async def prefetch_pages(request: Request, query_params, current_page: int, page_size: int):
+    """Pre-cache next 3 pages"""
+    try:
+        await asyncio.gather(
+            *[cache_page(request, query_params, current_page + i, page_size) for i in range(1, 4)],
+            return_exceptions=True
+        )
+    except Exception as e:
+        logger.error(f"Prefetch error: {e}")
+
+
+async def get_from_cache(cache_key: str, slave_cache, master_cache):
+    """Get data from cache and extend TTL"""
+    cached = await slave_cache.hgetall(cache_key)
+    if cached:
+        await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+        return json.loads(cached[b"data"].decode("utf-8")), int(cached[b"total"])
+    return None, None
 
 def _build_filters(query_params: schemas.IntelligenceQueryParams) -> List:
     """Build filter conditions for intelligence query"""
