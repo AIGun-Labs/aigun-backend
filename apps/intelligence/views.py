@@ -1,5 +1,6 @@
 import json
-from fastapi import Depends, APIRouter
+import asyncio
+from fastapi import Depends, APIRouter, BackgroundTasks
 import settings
 from views.render import APIResponse
 from data import code,msg
@@ -17,29 +18,87 @@ router = APIRouter(prefix='/api/v1/intelligence', tags=['intelligence'])
 logger = create_logger('aigun-intelligence')
 
 
+async def _cache_page(request, query_params, page, page_size):
+    """Cache a single page with lock protection"""
+    cache_key = f"aigun:intelligence:page:{query_params.model_dump_json()}:{page}:{page_size}"
+    
+    if await request.context.slavecache.backend.exists(cache_key):
+        return
+    
+    lock_key = f"{cache_key}:lock"
+    if await request.context.mastercache.backend.set(lock_key, "1", ex=10, nx=True):
+        try:
+            result, total = await list_intelligence(request, query_params, page, page_size)
+            await request.context.mastercache.backend.hset(
+                cache_key,
+                mapping={"data": json.dumps(result, cls=JsonResponseEncoder), "total": total}
+            )
+            await request.context.mastercache.backend.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+        finally:
+            await request.context.mastercache.backend.delete(lock_key)
+
+
+async def _prefetch_pages(request, query_params, current_page, page_size):
+    """Pre-cache next 3 pages"""
+    try:
+        await asyncio.gather(
+            *[_cache_page(request, query_params, current_page + i, page_size) for i in range(1, 4)],
+            return_exceptions=True
+        )
+    except Exception as e:
+        logger.error(f"Prefetch error: {e}")
+
+
+async def _get_from_cache(cache_key, slave_cache, master_cache):
+    """Get data from cache and extend TTL"""
+    cached = await slave_cache.hgetall(cache_key)
+    if cached:
+        await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+        return json.loads(cached[b"data"].decode("utf-8")), int(cached[b"total"])
+    return None, None
+
+
 @router.get("/")
 async def get_intelligences_list(
         query_params: IntelligenceQueryParams = Depends(),
         request=Depends(request_init(verify=False, limiter=False)),
-        page_query: PaginationQueryParams = Depends()
+        page_query: PaginationQueryParams = Depends(),
+        background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
-    Query intelligence list and cache subsequent page data in the background
+    Query intelligence list with pre-caching and cache breakdown prevention
     """
-    user_id = getattr(request, 'user_id', None) or "anonymous"
-    cache_key = f"aigun:intelligence:{hash((query_params.model_dump_json(), user_id, page_query.page, page_query.page_size))}"
+    cache_key = f"aigun:intelligence:page:{query_params.model_dump_json()}:{page_query.page}:{page_query.page_size}"
+    slave_cache = request.context.slavecache.backend
+    master_cache = request.context.mastercache.backend
     
-    result, total = await list_intelligence(request, query_params, page_query.page, page_query.page_size)
+    # Try cache first
+    result, total = await _get_from_cache(cache_key, slave_cache, master_cache)
+    if result:
+        background_tasks.add_task(_prefetch_pages, request, query_params, page_query.page, page_query.page_size)
+        return APIResponse(data=result, page=page_query.page, page_size=page_query.page_size, total=total)
     
-    # Cache with expiration in single operation
-    await request.context.mastercache.backend.hset(
-        name=cache_key,
-        mapping={"data": json.dumps(result, cls=JsonResponseEncoder), "total": total}
-    )
-    await request.context.mastercache.backend.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+    # Cache breakdown prevention
+    lock_key = f"{cache_key}:lock"
+    lock_acquired = await master_cache.set(lock_key, "1", ex=10, nx=True)
     
-    return APIResponse(code=code.CODE_OK, msg=msg.SUCCESS, data=result, 
-                      page=page_query.page, page_size=page_query.page_size, total=total)
+    if not lock_acquired:
+        for _ in range(20):
+            await asyncio.sleep(0.1)
+            result, total = await _get_from_cache(cache_key, slave_cache, master_cache)
+            if result:
+                background_tasks.add_task(_prefetch_pages, request, query_params, page_query.page, page_query.page_size)
+                return APIResponse(data=result, page=page_query.page, page_size=page_query.page_size, total=total)
+    
+    try:
+        result, total = await list_intelligence(request, query_params, page_query.page, page_query.page_size)
+        await master_cache.hset(cache_key, mapping={"data": json.dumps(result, cls=JsonResponseEncoder), "total": total})
+        await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
+        background_tasks.add_task(_prefetch_pages, request, query_params, page_query.page, page_query.page_size)
+        return APIResponse(data=result, page=page_query.page, page_size=page_query.page_size, total=total)
+    finally:
+        if lock_acquired:
+            await master_cache.delete(lock_key)
 
 
 @router.get("/entities")
