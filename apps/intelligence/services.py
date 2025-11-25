@@ -21,7 +21,7 @@ import settings
 logger = create_logger("dogex-intelligence")
 
 
-async def cache_page(request: Request, query_params, page: int, page_size: int):
+async def cache_page(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int) -> None:
     """Cache a single page with lock protection"""
     cache_key = f"aigun:intelligence:page:{query_params.model_dump_json()}:{page}:{page_size}"
     
@@ -41,7 +41,7 @@ async def cache_page(request: Request, query_params, page: int, page_size: int):
             await request.context.mastercache.backend.delete(lock_key)
 
 
-async def prefetch_pages(request: Request, query_params, current_page: int, page_size: int):
+async def prefetch_pages(request: Request, query_params: schemas.IntelligenceQueryParams, current_page: int, page_size: int) -> None:
     """Pre-cache next 3 pages"""
     try:
         await asyncio.gather(
@@ -52,7 +52,7 @@ async def prefetch_pages(request: Request, query_params, current_page: int, page
         logger.error(f"Prefetch error: {e}")
 
 
-async def get_from_cache(cache_key: str, slave_cache, master_cache):
+async def get_from_cache(cache_key: str, slave_cache: Any, master_cache: Any) -> tuple[Optional[List[Dict]], Optional[int]]:
     """Get data from cache and extend TTL"""
     cached = await slave_cache.hgetall(cache_key)
     if cached:
@@ -60,7 +60,7 @@ async def get_from_cache(cache_key: str, slave_cache, master_cache):
         return json.loads(cached[b"data"].decode("utf-8")), int(cached[b"total"])
     return None, None
 
-def _build_filters(query_params: schemas.IntelligenceQueryParams) -> List:
+def _build_filters(query_params: schemas.IntelligenceQueryParams) -> List[Any]:
     """Build filter conditions for intelligence query"""
     filters = []
     
@@ -85,7 +85,7 @@ def _build_filters(query_params: schemas.IntelligenceQueryParams) -> List:
     return filters
 
 
-async def list_intelligence(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int):
+async def list_intelligence(request: Request, query_params: schemas.IntelligenceQueryParams, page: int, page_size: int) -> tuple[List[Dict[str, Any]], int]:
     """
     Get intelligence list with pagination and filtering support
 
@@ -161,7 +161,7 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
     return processed_results, total_count
 
 
-async def _get_cached_total_count(master_cache, session, base_query, filters, cache_key):
+async def _get_cached_total_count(master_cache: Any, session: Any, base_query: Any, filters: List[Any], cache_key: str) -> int:
     """Get total count from cache or database"""
     cached_total = await master_cache.get(cache_key)
 
@@ -180,7 +180,7 @@ async def _get_cached_total_count(master_cache, session, base_query, filters, ca
     return total_count
 
 
-async def _execute_intelligence_query(session, base_query, filters, load_options, offset, limit):
+async def _execute_intelligence_query(session: Any, base_query: Any, filters: List[Any], load_options: Any, offset: int, limit: int) -> List[Any]:
     """Execute the main intelligence query with pagination"""
     query = base_query.where(*filters).options(
         defer(IntelligenceModel.extra_datas),
@@ -192,7 +192,7 @@ async def _execute_intelligence_query(session, base_query, filters, load_options
     return (await session.execute(query)).scalars().all()
 
 
-async def _process_intelligence_results(request, intelligences, query_params):
+async def _process_intelligence_results(request: Request, intelligences: List[Any], query_params: schemas.IntelligenceQueryParams) -> List[Dict[str, Any]]:
     """Process intelligence results and enrich with additional data"""
     # Fetch chain information for all tokens
     chain_infos = await get_chain_infos(request, intelligences)
@@ -391,7 +391,7 @@ async def get_showed_tokens_info(request: Request, showed_tokens: Optional[List]
     return entities
 
 
-async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_list: list[str]):
+async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_list: List[str]) -> Dict[str, Any]:
     """
     Get real-time token data for intelligence
     """
@@ -453,7 +453,7 @@ async def get_intelligence_latest_entities_v2(request: Request, intelligence_id_
         return await refresh_token_data_from_cache_v2(request, data)
 
 
-async def refresh_token_data_from_cache_v2(request: Request, data):
+async def refresh_token_data_from_cache_v2(request: Request, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Only perform real-time queries for tokens within the visible screen
     """
@@ -489,7 +489,7 @@ async def refresh_token_data_from_cache_v2(request: Request, data):
     return data
 
 
-async def get_showed_token_without_chain_infos(request: Request, showed_tokens: Optional[List], intelligence_id):
+async def get_showed_token_without_chain_infos(request: Request, showed_tokens: Optional[List[Dict]], intelligence_id: str) -> List[Dict[str, Any]]:
     """
     showed token data
     """
@@ -636,7 +636,7 @@ async def cache_intelligence_next_pages(request: Request, query_params: schemas.
         await master_cache.expire(cache_key, settings.EXPIRES_FOR_INTELLIGENCE)
 
 
-async def retrieve_token(request: Request, network: str, address: str):
+async def retrieve_token(request: Request, network: str, address: str) -> Dict[str, Any]:
     async with request.context.database.dogex() as session:
         sql = select(models.TokenChainDataModel).where(
             models.TokenChainDataModel.network == network,
@@ -692,7 +692,7 @@ async def get_highest_increase_rate_v2(request: Request, network: str, address: 
         return 0.0
 
 
-async def retrieve_intelligence(request: Request, intelligence_id: str):
+async def retrieve_intelligence(request: Request, intelligence_id: str) -> Dict[str, Any]:
     async with request.context.database.dogex() as session:
         entity_load_options = selectinload(
             IntelligenceModel.entity_intelligences
@@ -732,7 +732,7 @@ async def retrieve_intelligence(request: Request, intelligence_id: str):
         return result
 
 
-async def get_intelligence_info(intelligence, request, chain_infos):
+async def get_intelligence_info(intelligence: Any, request: Request, chain_infos: Dict[str, Any]) -> Dict[str, Any]:
     intelligence_info = schemas.IntelligenceWithoutEntitiesOutSchema.model_validate(
         intelligence
     ).model_dump()
@@ -744,7 +744,7 @@ async def get_intelligence_info(intelligence, request, chain_infos):
     return intelligence_info
 
 
-async def get_intelligence_related_tokens(intelligence, request: Request, chain_infos):
+async def get_intelligence_related_tokens(intelligence: Any, request: Request, chain_infos: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Get intelligence related tokens with caching"""
     cache_key = f"dogex:intelligence:latest_entities:intelligence_id:{intelligence.id}"
 

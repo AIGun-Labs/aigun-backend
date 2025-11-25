@@ -1,5 +1,6 @@
 import json
 import asyncio
+from typing import Tuple, Optional, List, Dict, Any
 from fastapi import Depends, APIRouter, BackgroundTasks
 import settings
 from views.render import APIResponse
@@ -14,6 +15,7 @@ from apps.intelligence.services import (
 from app.dependencies import PaginationQueryParams
 from data.logger import create_logger
 from views.render import JsonResponseEncoder
+from middleware import Request
 
 
 router = APIRouter(prefix='/api/v1/intelligence', tags=['intelligence'])
@@ -24,7 +26,7 @@ logger = create_logger('aigun-intelligence')
 @router.get("/")
 async def get_intelligences_list(
         query_params: IntelligenceQueryParams = Depends(),
-        request=Depends(request_init(verify=False, limiter=False)),
+        request: Request = Depends(request_init(verify=False, limiter=False)),
         page_query: PaginationQueryParams = Depends(),
         background_tasks: BackgroundTasks = BackgroundTasks()
 ):
@@ -65,7 +67,10 @@ async def get_intelligences_list(
 
 
 @router.get("/entities")
-async def list_intelligence_latest_entity(intelligence_ids: str,  request=Depends(request_init(verify=False, limiter=True))):
+async def list_intelligence_latest_entity(
+        intelligence_ids: str,
+        request: Request = Depends(request_init(verify=False, limiter=True))
+) -> APIResponse:
     """
     Get the latest associated token data
     """
@@ -77,7 +82,11 @@ async def list_intelligence_latest_entity(intelligence_ids: str,  request=Depend
 
 
 @router.get("/token/info")
-async def get_token_info(network: str, address: str, request=Depends(request_init(verify=False, limiter=False))):
+async def get_token_info(
+        network: str,
+        address: str,
+        request: Request = Depends(request_init(verify=False, limiter=False))
+) -> APIResponse:
     """
     Get token details
     """
@@ -89,8 +98,9 @@ async def get_token_info(network: str, address: str, request=Depends(request_ini
 
 @router.get("/intelligence/{intelligence_id}")
 async def get_intelligence_info(
-    intelligence_id: str, request=Depends(request_init(verify=False))
-):
+        intelligence_id: str,
+        request: Request = Depends(request_init(verify=False))
+) -> APIResponse:
     """
     intelligence detail
     """
