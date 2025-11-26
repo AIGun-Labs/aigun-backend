@@ -121,25 +121,25 @@ async def get_monitor_time(created_at: Union[str, datetime, None], published_at:
 
 async def get_all_chain_info(intelligence: Dict[str, Any], context: Any) -> Dict[str, Dict[str, Any]]:
     """Get chain information for all entities in intelligence"""
-    chain_id_list = [entity["network"] for entity in intelligence["entities"]]
+    chain_slugs = {entity["network"] for entity in intelligence.get("entities", [])}
 
-    if not chain_id_list:
+    if not chain_slugs:
         return {}
 
     async with context.database.dogex() as session:
         results = (await session.execute(
             select(
+                models.ChainModel.slug,
                 models.ChainModel.id,
                 models.ChainModel.network_id,
                 models.ChainModel.name,
                 models.ChainModel.symbol,
-                models.ChainModel.slug,
                 models.ChainModel.logo
-            ).where(models.ChainModel.slug.in_(chain_id_list))
+            ).where(models.ChainModel.slug.in_(chain_slugs))
         )).mappings().all()
 
         return {
-            str(chain["slug"]): {
+            chain["slug"]: {
                 "id": str(chain["id"]),
                 "network_id": str(chain["network_id"]),
                 "name": chain["name"],
@@ -155,27 +155,27 @@ def handle_entity_info(entity_list: List[Dict[str, Any]], chain_mapping_info: Di
     """Transform entity list with chain information"""
     return [
         {
-            "id": str(entity.get("id")),
-            "entity_id": str(entity.get("entityId")),
-            "name": entity.get("name"),
-            "symbol": entity.get("symbol"),
-            "standard": entity.get("standard"),
-            "decimals": entity.get("decimals"),
-            "contract_address": entity.get("contractAddress"),
-            "logo": entity.get("logo"),
+            "id": str(e.get("id")),
+            "entity_id": str(e.get("entityId")),
+            "name": e.get("name"),
+            "symbol": e.get("symbol"),
+            "standard": e.get("standard"),
+            "decimals": e.get("decimals"),
+            "contract_address": e.get("contractAddress"),
+            "logo": e.get("logo"),
             "stats": {
-                "warning_price_usd": entity.get("price_usd") or "0",
-                "warning_market_cap": entity.get("market_cap") or "0",
-                "current_price_usd": entity.get("price_usd") or "0",
-                "current_market_cap": entity.get("market_cap") or "0",
-                "liquidity": entity.get("liquidity") or "0",
-                "volume_24h": entity.get("volume_24h") or "0",
+                "warning_price_usd": e.get("price_usd") or "0",
+                "warning_market_cap": e.get("market_cap") or "0",
+                "current_price_usd": e.get("price_usd") or "0",
+                "current_market_cap": e.get("market_cap") or "0",
+                "liquidity": e.get("liquidity") or "0",
+                "volume_24h": e.get("volume_24h") or "0",
                 "highest_increase_rate": "0",
             },
-            "chain": chain_mapping_info.get(str(entity.get("network")), {}),
-            "is_native": entity.get("is_native", False),
-            "created_at": entity.get("createdAt"),
-            "updated_at": entity.get("updatedAt")
+            "chain": chain_mapping_info.get(e.get("network"), {}),
+            "is_native": e.get("is_native", False),
+            "created_at": e.get("createdAt"),
+            "updated_at": e.get("updatedAt")
         }
-        for entity in entity_list
+        for e in entity_list
     ]
