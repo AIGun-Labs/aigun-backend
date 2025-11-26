@@ -5,7 +5,7 @@ from apps.intelligence import models
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from data.logger import create_logger
-from typing import List
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from views.render import JsonResponseEncoder
 
@@ -13,16 +13,15 @@ from views.render import JsonResponseEncoder
 logger = create_logger('aigun-intelligence-ws')
 
 
-def remove_part_info(intelligence):
-    del intelligence["source_id"]
-    del intelligence["abstract"]
-    del intelligence["is_visible"]
-    del intelligence["is_deleted"]
-
+def remove_part_info(intelligence: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove unnecessary fields from intelligence data"""
+    for key in ["source_id", "abstract", "is_visible", "is_deleted"]:
+        intelligence.pop(key, None)
     return intelligence
 
 
-async def get_author_info(intelligence, context):
+async def get_author_info(intelligence: Union[Dict[str, Any], Any], context: Any) -> Dict[str, Any]:
+    """Get author information with caching"""
     intelligence_id = intelligence["id"] if isinstance(intelligence, dict) else intelligence.id
     cache_key = f"aigun:intelligence:author_info:intelligence_id:{intelligence_id}"
 
@@ -40,16 +39,18 @@ async def get_author_info(intelligence, context):
     }
 
     async with context.database.dogex() as session:
-        sql = select(models.IntelligenceModel).where(
-            models.IntelligenceModel.id == intelligence_id
-        ).options(
-            selectinload(models.IntelligenceModel.entity_intelligences)
-            .selectinload(models.EntityIntelligenceModel.entity)
-            .selectinload(models.EntityModel.entity_datasources)
-            .selectinload(models.EntityDatasource.account)
-        )
+        # Query with eager loading
+        intel = (await session.execute(
+            select(models.IntelligenceModel)
+            .where(models.IntelligenceModel.id == intelligence_id)
+            .options(
+                selectinload(models.IntelligenceModel.entity_intelligences)
+                .selectinload(models.EntityIntelligenceModel.entity)
+                .selectinload(models.EntityModel.entity_datasources)
+                .selectinload(models.EntityDatasource.account)
+            )
+        )).scalars().first()
 
-        intel = (await session.execute(sql)).scalars().first()
         if not intel or not intel.entity_intelligences:
             return default_author_info
 
@@ -66,8 +67,10 @@ async def get_author_info(intelligence, context):
                 logger.error(f"Account not found: {entity_intelligence.master_id} for intelligence {intelligence_id}")
                 continue
 
-            platform_name = (entity_intelligence.master_type.strip().split(",", 1)[0][1:]
-                             if entity_intelligence.master_type else "twitter")
+            platform_name = (
+                entity_intelligence.master_type.strip().split(",", 1)[0][1:]
+                if entity_intelligence.master_type else "twitter"
+            )
 
             data = {
                 "platform": {
@@ -82,14 +85,11 @@ async def get_author_info(intelligence, context):
 
             # Add prompt for twitter
             if intel.type == "twitter":
-                try:
-                    description = ws_schemas.twitter_action_prompt_mapping.get(
-                        intelligence.get("subtype") if isinstance(intelligence, dict) else intel.subtype,
-                        "'s new release on X has sparked investment opportunities."
-                    )
-                    data["prompt"] = account.name + description
-                except:
-                    pass
+                subtype = intelligence.get("subtype") if isinstance(intelligence, dict) else intel.subtype
+                description = ws_schemas.twitter_action_prompt_mapping.get(
+                    subtype, "'s new release on X has sparked investment opportunities."
+                )
+                data["prompt"] = account.name + description
 
             # Cache and return
             await context.mastercache.backend.set(
@@ -102,25 +102,14 @@ async def get_author_info(intelligence, context):
     return default_author_info
 
 
-async def get_monitor_time(created_at, published_at):
-    """
-    Calculate monitor time in milliseconds between created_at and published_at
-
-    Args:
-        created_at: Creation timestamp (string ISO format or datetime object)
-        published_at: Publication timestamp (string ISO format or datetime object)
-
-    Returns:
-        int: Monitor time in milliseconds (positive if created after published)
-    """
+async def get_monitor_time(created_at: Union[str, datetime, None], published_at: Union[str, datetime, None]) -> int:
+    """Calculate monitor time in milliseconds between created_at and published_at"""
     try:
-        # Handle string inputs
         if isinstance(created_at, str):
             created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
         if isinstance(published_at, str):
             published_at = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
 
-        # Ensure both are datetime objects
         if isinstance(created_at, datetime) and isinstance(published_at, datetime):
             return int((created_at - published_at).total_seconds() * 1000)
 
@@ -130,41 +119,42 @@ async def get_monitor_time(created_at, published_at):
         return 0
 
 
-async def get_all_chain_info(intelligence, context):
+async def get_all_chain_info(intelligence: Dict[str, Any], context: Any) -> Dict[str, Dict[str, Any]]:
+    """Get chain information for all entities in intelligence"""
+    chain_id_list = [entity["network"] for entity in intelligence["entities"]]
 
-    chain_id_list = []
-    for entity in intelligence["entities"]:
-        chain_id_list.append(entity["network"])
+    if not chain_id_list:
+        return {}
 
     async with context.database.dogex() as session:
-        sql = select(
-            models.ChainModel.id,
-            models.ChainModel.network_id,
-            models.ChainModel.name,
-            models.ChainModel.symbol,
-            models.ChainModel.slug,
-            models.ChainModel.logo
-        ).where(
-            models.ChainModel.slug.in_(chain_id_list)
-        )
+        results = (await session.execute(
+            select(
+                models.ChainModel.id,
+                models.ChainModel.network_id,
+                models.ChainModel.name,
+                models.ChainModel.symbol,
+                models.ChainModel.slug,
+                models.ChainModel.logo
+            ).where(models.ChainModel.slug.in_(chain_id_list))
+        )).mappings().all()
 
-        results = (await session.execute(sql)).mappings().all()
+        return {
+            str(chain["slug"]): {
+                "id": str(chain["id"]),
+                "network_id": str(chain["network_id"]),
+                "name": chain["name"],
+                "symbol": chain["symbol"],
+                "slug": chain["slug"],
+                "logo": chain["logo"]
+            }
+            for chain in results
+        }
 
-        results = [dict(item) for item in results]
 
-        # Convert UUID to string to prevent JSON serialization error
-        for chain_info in results:
-            chain_info["id"] = str(chain_info["id"])
-            chain_info["network_id"] = str(chain_info["network_id"])
-
-        return {str(chain_info["slug"]): chain_info  for chain_info in results}
-
-
-def handle_entity_info(entity_list: List, chain_mapping_info: dict):
-    entities = []
-
-    for entity in entity_list:
-        data = {
+def handle_entity_info(entity_list: List[Dict[str, Any]], chain_mapping_info: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Transform entity list with chain information"""
+    return [
+        {
             "id": str(entity.get("id")),
             "entity_id": str(entity.get("entityId")),
             "name": entity.get("name"),
@@ -174,20 +164,18 @@ def handle_entity_info(entity_list: List, chain_mapping_info: dict):
             "contract_address": entity.get("contractAddress"),
             "logo": entity.get("logo"),
             "stats": {
-                "warning_price_usd": entity.get("price_usd") if entity.get("price_usd") else "0",
-                "warning_market_cap": entity.get("market_cap") if entity.get("market_cap") else "0",
-                "current_price_usd": entity.get("price_usd")  if entity["price_usd"] else "0",
-                "current_market_cap": entity.get("market_cap") if entity.get("market_cap") else "0",
-                "liquidity": entity.get("liquidity") if entity.get("liquidity") else "0",
-                "volume_24h": entity.get("volume_24h") if entity.get("volume_24h") else "0",
+                "warning_price_usd": entity.get("price_usd") or "0",
+                "warning_market_cap": entity.get("market_cap") or "0",
+                "current_price_usd": entity.get("price_usd") or "0",
+                "current_market_cap": entity.get("market_cap") or "0",
+                "liquidity": entity.get("liquidity") or "0",
+                "volume_24h": entity.get("volume_24h") or "0",
                 "highest_increase_rate": "0",
             },
-            "chain": chain_mapping_info[str(entity.get("network"))],
-            "is_native": entity.get("is_native") if entity.get("is_native") is not None else False,
+            "chain": chain_mapping_info.get(str(entity.get("network")), {}),
+            "is_native": entity.get("is_native", False),
             "created_at": entity.get("createdAt"),
             "updated_at": entity.get("updatedAt")
         }
-
-        entities.append(data)
-
-    return entities
+        for entity in entity_list
+    ]
