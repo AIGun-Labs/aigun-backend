@@ -102,19 +102,20 @@ async def get_author_info(intelligence: Union[Dict[str, Any], Any], context: Any
     return default_author_info
 
 
+def _parse_datetime(dt: Union[str, datetime, None]) -> Optional[datetime]:
+    """Parse datetime from string or return datetime object"""
+    if isinstance(dt, str):
+        return datetime.fromisoformat(dt.replace('Z', '+00:00'))
+    return dt if isinstance(dt, datetime) else None
+
+
 async def get_monitor_time(created_at: Union[str, datetime, None], published_at: Union[str, datetime, None]) -> int:
     """Calculate monitor time in milliseconds between created_at and published_at"""
     try:
-        if isinstance(created_at, str):
-            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-        if isinstance(published_at, str):
-            published_at = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
-
-        if isinstance(created_at, datetime) and isinstance(published_at, datetime):
-            return int((created_at - published_at).total_seconds() * 1000)
-
-        return 0
-    except (ValueError, TypeError) as e:
+        created = _parse_datetime(created_at)
+        published = _parse_datetime(published_at)
+        return int((created - published).total_seconds() * 1000) if created and published else 0
+    except (ValueError, TypeError, AttributeError) as e:
         logger.warning(f"Failed to calculate monitor time: {e}")
         return 0
 
