@@ -12,7 +12,8 @@ logger = create_logger("dogex-intelligence")
 
 
 class IntelligenceQueryParams(BaseModel):
-
+    type: Optional[str] | None = Query(default=None, description="radar_signal/event")
+    subtype: Optional[str] | None = Query(default=None, description="subtype")
     is_valuable: Optional[bool] | None = Query(default=True, description="Whether it is valuable")
 
     address: Optional[str] | None = Query(default=None, description="Token address")

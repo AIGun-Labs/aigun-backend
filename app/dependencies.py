@@ -17,21 +17,25 @@ from data.logger import create_logger
 
 req_logger = create_logger("dogex-intelligence-request")
 
+
 def request_init(*, verify: bool = True, limiter: bool = True):
     async def wrapper(request: Request, response: Response):
         from utils.exceptions import AuthException
+
         request = Request.from_request(request)
 
-        # Try to parse token (if exists)
+        # Attempt to parse token (if exists)
         request.authorize()
 
-        # If token exists and is verified, parse user info
+        # If token exists and is verified, parse user information
         if request.verified:
             request.user_id = request.user.get("sub")
             request.tid = request.user.get("tid")
             request.email = request.user.get("email")
+            request.state.user_id = request.user.get("sub")
+
         else:
-            # When no token or invalid token, decide whether to throw exception based on verify parameter
+            # When no token or invalid token, decide whether to raise exception based on verify parameter
             if verify:
                 verify_response = request.response_for_verify()
                 raise AuthException(
@@ -45,23 +49,25 @@ def request_init(*, verify: bool = True, limiter: bool = True):
                 request.user_id = None
                 request.tid = None
                 request.email = None
+                request.state.user_id = None
 
         # Authentication verification
         if verify:
-            # Verify if account is obsolete
+            # Verify if account has been deactivated
             await check_account_valid(request)
 
-        # Record AppStore review access paths
+        # Log AppStore review access paths
         if request.email and request.email == "aigun_appstore_review@gmail.com":
             req_logger.info(f"AppStore review access path, url: {request.url}")
 
-        # Global rate limit verification
-        if limiter:
-            await RateLimiter(
-                times=settings.LIMITER_CONFIG["GLOBAL_THROTTLE_RATES"]["limit_times"],
-                seconds=settings.LIMITER_CONFIG["GLOBAL_THROTTLE_RATES"]["limit_seconds"],
-                identifier=get_id_or_ip
-            )(request, response)
+        # Global rate limiting verification
+        # if limiter:
+        #     await RateLimiter(
+        #         times=settings.LIMITER_CONFIG["GLOBAL_THROTTLE_RATES"]["limit_times"],
+        #         seconds=settings.LIMITER_CONFIG["GLOBAL_THROTTLE_RATES"]["limit_seconds"],
+        #         identifier=get_id_or_ip
+        #     )(request, response)
+
         return request
 
     return wrapper

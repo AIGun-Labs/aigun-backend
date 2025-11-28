@@ -26,18 +26,12 @@ SLAVE_CACHE_URL = os.getenv('SLAVE_CACHE_URL', 'redis://localhost:6379/0')
 RABBIT_URL = os.getenv('RABBIT_URL', 'amqp://guest:guest@localhost:5672/')
 # RABBIT_URL = os.getenv('RABBIT_URL', 'amqp://test_user:123456@localhost:5672/')
 
-# Fission Queue Name
-FISSION_QUEUE = os.getenv("FISSION_QUEUE", "fission_queue_test")
 
 # Intelligence Queue Name
 INTELLIGENCE_QUEUE = os.getenv("INTELLIGENCE_QUEUE", "intelligence_queue_test")
 
 # Intelligence Consumer Queue Name
 INTELLIGENCE_CONSUMER_QUEUE = os.getenv("INTELLIGENCE_CONSUMER_QUEUE", "intelligence_consumer_queue_test")
-
-# Email Service Queue
-STMP_SERVICE_QUEUE = os.getenv("STMP_SERVICE_QUEUE", "basic_services_queue")
-
 
 
 # JWT Configuration

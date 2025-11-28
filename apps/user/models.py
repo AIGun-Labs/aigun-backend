@@ -4,8 +4,8 @@ Store model of  user module
 
 from data.db import Base
 from sqlalchemy.orm import  relationship
-from sqlalchemy import Column, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Text,  Integer, BigInteger, Numeric
 
 
 

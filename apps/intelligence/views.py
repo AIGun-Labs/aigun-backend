@@ -26,9 +26,9 @@ logger = create_logger('aigun-intelligence')
 @router.get("/")
 async def get_intelligences_list(
         query_params: IntelligenceQueryParams = Depends(),
-        request: Request = Depends(request_init(verify=False, limiter=False)),
         page_query: PaginationQueryParams = Depends(),
-        background_tasks: BackgroundTasks = BackgroundTasks()
+        background_tasks: BackgroundTasks = BackgroundTasks(),
+        request=Depends(request_init(verify=False, limiter=False))
 ):
     """
     Query intelligence list with pre-caching and cache breakdown prevention
@@ -69,7 +69,7 @@ async def get_intelligences_list(
 @router.get("/entities")
 async def list_intelligence_latest_entity(
         intelligence_ids: str,
-        request: Request = Depends(request_init(verify=False, limiter=True))
+        request = Depends(request_init(verify=False, limiter=True))
 ) -> APIResponse:
     """
     Get the latest associated token data
@@ -85,7 +85,7 @@ async def list_intelligence_latest_entity(
 async def get_token_info(
         network: str,
         address: str,
-        request: Request = Depends(request_init(verify=False, limiter=False))
+        request = Depends(request_init(verify=False, limiter=False))
 ) -> APIResponse:
     """
     Get token details
@@ -99,7 +99,7 @@ async def get_token_info(
 @router.get("/intelligence/{intelligence_id}")
 async def get_intelligence_info(
         intelligence_id: str,
-        request: Request = Depends(request_init(verify=False))
+        request = Depends(request_init(verify=False))
 ) -> APIResponse:
     """
     intelligence detail

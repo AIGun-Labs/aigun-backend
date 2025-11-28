@@ -90,7 +90,6 @@ class RabbitMQ:
         """
         Send a pydantic model to the specified queue.
 
-        Send a pydantic model to the specified queue.
         """
         ...
 
@@ -198,3 +197,39 @@ class RabbitMQ:
             # Declare a named queue or temporary queue (all queues with exchanges are temporary queues)
             if queue_name and exchange_name is None:
                 queue: aio_pika.robust_queue.RobustQueue = await channel.get_queue(queue_name, ensure=True)
+            else:
+                queue = await channel.declare_queue("", exclusive=True)
+
+            if exchange_name is not None:
+                exchange: RobustExchange = await channel.get_exchange(exchange_name)
+            elif self._exchange is not None:
+                exchange = self._exchange
+            else:
+                exchange = None
+            if exchange is not None:
+                if queue_name:
+                    bindings = queue_name.split(',')
+                    for binding in bindings:
+                        await queue.bind(exchange, binding)
+                else:
+                    await queue.bind(exchange)
+
+            if model is str:
+                async for message in queue:
+                    message: aio_pika.IncomingMessage
+                    yield message.body.decode(), message
+            elif model is bytes or model is None:
+                async for message in queue:
+                    message: aio_pika.IncomingMessage
+                    yield message.body, message
+            elif issubclass(model, BaseModel):
+                async for message in queue:
+                    message: aio_pika.IncomingMessage
+                    yield model.model_validate_json(message.body, strict=strict, context=context), message
+            else:
+                async for message in queue:
+                    message: aio_pika.IncomingMessage
+                    yield jsonlib.loads(message.body), message
+
+    async def close(self) -> None:
+        await self._client.close()

@@ -48,6 +48,14 @@ class IntelligenceModel(Base):
                                         foreign_keys="[EntityIntelligenceModel.intelligence_id]",
                                         )
 
+    tag_intelligences = relationship(
+        "TagIntelligenceModel",
+        back_populates="intelligence",
+        lazy="select",
+        primaryjoin="IntelligenceModel.id == TagIntelligenceModel.intelligence_id",
+        foreign_keys="[TagIntelligenceModel.intelligence_id]"
+    )
+
 
 class ChainModel(Base):
     __tablename__ = "chain"
@@ -173,6 +181,13 @@ class TokenChainDataModel(Base):
                          primaryjoin="TokenChainDataModel.chain_id == ChainModel.id",
                          foreign_keys=[chain_id])
 
+    tokendata_entity = relationship("EntityModel", back_populates="tokendata_entity", lazy="select",
+                               primaryjoin="TokenChainDataModel.entity_id == EntityModel.id",
+                               foreign_keys=[entity_id])
+
+    chain_datas = relationship("TokenModel", back_populates="chain_datas", lazy="select",
+                               primaryjoin="TokenChainDataModel.project_id == TokenModel.id",
+                               foreign_keys=[project_id])
 
 class EntityDatasource(Base):
     __tablename__ = "entity_datasource"
@@ -307,3 +322,28 @@ class TagModel(Base):
 
     ai_agent = relationship("AiAgentModel", back_populates="tag", lazy="select",
                             primaryjoin="TagModel.id == AiAgentModel.tag_id", foreign_keys="[AiAgentModel.tag_id]")
+
+
+class TagIntelligenceModel(Base):
+
+    __tablename__ = "tag_intelligence"
+
+    tag_id = Column(UUID(as_uuid=True), nullable=False, comment="tag ID")
+    intelligence_id = Column(UUID(as_uuid=True), nullable=False, comment="intel ID")
+    type = Column(Text, nullable=True, comment="type (such as signal)")
+
+    tag = relationship(
+        "TagModel",
+        back_populates="tag_intelligences",
+        lazy="select",
+        primaryjoin="TagIntelligenceModel.tag_id == TagModel.id",
+        foreign_keys=[tag_id]
+    )
+
+    intelligence = relationship(
+        "IntelligenceModel",
+        back_populates="tag_intelligences",
+        lazy="select",
+        primaryjoin="TagIntelligenceModel.intelligence_id == IntelligenceModel.id",
+        foreign_keys=[intelligence_id]
+    )
