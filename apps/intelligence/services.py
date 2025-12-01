@@ -538,14 +538,6 @@ async def get_showed_token_without_chain_infos(request: Request, showed_tokens: 
             warning_price_usd = float(showed_token["warning_price_usd"])
             warning_market_cap = float(showed_token["warning_market_cap"])
 
-            try:
-                liquidity = float(showed_token["liquidity"])
-            except:
-                liquidity = 0
-            try:
-                volume_24h = float(showed_token["volume_24h"])
-            except:
-                volume_24h = 0
 
             # Find the token from the dictionary
             token = token_dict.get((network, contract_address))
