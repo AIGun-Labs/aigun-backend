@@ -120,9 +120,7 @@ async def list_intelligence(request: Request, query_params: schemas.Intelligence
         .selectinload(TokenChainDataModel.chain),
         selectinload(EntityModel.tokendata_entity)
         .selectinload(TokenChainDataModel.chain),
-        selectinload(EntityModel.entity_tags),
-        selectinload(EntityModel.entity_NewsPlatform),
-        selectinload(EntityModel.exchange_platform)
+        selectinload(EntityModel.entity_tags)
     )
 
     async with request.context.database.dogex() as session:
@@ -169,9 +167,7 @@ async def _get_cached_total_count(master_cache: Any, session: Any, base_query: A
         return int(cached_total.decode("utf-8")) if cached_total.decode("utf-8") else 0
 
     # Calculate and cache total count
-    count_query = base_query.where(*filters).options(
-        defer(IntelligenceModel.extra_datas)
-    ).distinct()
+    count_query = base_query.where(*filters).distinct()
 
     total_count_sql = select(func.count()).select_from(count_query.subquery())
     total_count = (await session.execute(total_count_sql)).scalar()
@@ -183,7 +179,6 @@ async def _get_cached_total_count(master_cache: Any, session: Any, base_query: A
 async def _execute_intelligence_query(session: Any, base_query: Any, filters: List[Any], load_options: Any, offset: int, limit: int) -> List[Any]:
     """Execute the main intelligence query with pagination"""
     query = base_query.where(*filters).options(
-        defer(IntelligenceModel.extra_datas),
         load_options
     ).order_by(
         IntelligenceModel.published_at.desc()
@@ -207,9 +202,7 @@ async def _process_intelligence_results(request: Request, intelligences: List[An
     processed_results = []
     for intelligence in intelligences:
         # Validate and convert intelligence data
-        intelligence_info = schemas.IntelligenceListOutSchema.model_validate(
-            intelligence
-        ).model_dump()
+        intelligence_info = schemas.IntelligenceListOutSchema.model_validate(intelligence).model_dump()
 
         # Enrich with token information
         intelligence_info["entities"] = await get_showed_tokens_info(

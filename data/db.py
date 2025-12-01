@@ -50,6 +50,12 @@ def declare_database(config: DatabaseConfig | None = None, *, url: str | None = 
         max_overflow = config.max_overflow
         autoflush = config.autoflush
     assert url is not None, "url is required"
+
+    # Retrieve the schema carried by the connector
+    schema = "test"
+    if "?schema=" in url:
+        url, schema = url.rsplit("?schema=", 1)
+
     return async_sessionmaker(
         create_async_engine(url) if url.startswith('sqlite') else
         create_async_engine(
@@ -59,7 +65,8 @@ def declare_database(config: DatabaseConfig | None = None, *, url: str | None = 
             max_overflow=100,
             pool_timeout=30,
             pool_recycle=300, # 3600
-            pool_pre_ping=True
+            pool_pre_ping=True,
+            connect_args={"server_settings": {"search_path": schema.lower()}}
         ),
         class_=AsyncSession,
         autoflush=autoflush,

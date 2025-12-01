@@ -148,7 +148,7 @@ class EntityModel(Base):
 
 
 class TokenChainDataModel(Base):
-    __tablename__ = "project_chain_data"
+    __tablename__ = "token"
 
     is_visible = Column(Boolean, default=True)
     entity_id = Column(UUID(as_uuid=True), nullable=True)
