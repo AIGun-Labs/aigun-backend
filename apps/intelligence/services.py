@@ -704,16 +704,20 @@ async def retrieve_intelligence(request: Request, intelligence_id: str) -> Dict[
             models.IntelligenceModel.id == intelligence_id,
             models.IntelligenceModel.is_visible == True,
             models.IntelligenceModel.is_deleted == False
-        ).options(entity_load_options)
+        ).options(
+            entity_load_options,
+            selectinload(IntelligenceModel.extra_datas)
+        )
 
         intelligence = (await session.execute(sql)).scalars().first()
         if not intelligence:
             return {}
 
         chain_infos = await get_chain_infos(request, [intelligence])
+        token_list = intelligence.adjusted_tokens[-1] if intelligence.adjusted_tokens else intelligence.showed_tokens
 
         result = {
-            "intelligence": await get_intelligence_info(intelligence, request, chain_infos)
+            "intelligence": await get_intelligence_info(intelligence, request, chain_infos, token_list)
         }
 
         # Find author entity
@@ -725,87 +729,22 @@ async def retrieve_intelligence(request: Request, intelligence_id: str) -> Dict[
         return result
 
 
-async def get_intelligence_info(intelligence: Any, request: Request, chain_infos: Dict[str, Any]) -> Dict[str, Any]:
+async def get_intelligence_info(intelligence: Any, request: Request, chain_infos: Dict[str, Any], token_list: Optional[List] = None) -> Dict[str, Any]:
     intelligence_info = schemas.IntelligenceWithoutEntitiesOutSchema.model_validate(
         intelligence
     ).model_dump()
 
-    intelligence_info["entities"] = await get_intelligence_related_tokens(
-        intelligence, request, chain_infos
+    if token_list is None:
+        token_list = intelligence.adjusted_tokens[-1] if intelligence.adjusted_tokens else intelligence.showed_tokens
+
+    intelligence_info["entities"] = await get_showed_tokens_info(
+        request, token_list, chain_infos, intelligence
     )
 
     return intelligence_info
 
 
-async def get_intelligence_related_tokens(intelligence: Any, request: Request, chain_infos: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Get intelligence related tokens with caching"""
-    cache_key = f"dogex:intelligence:latest_entities:intelligence_id:{intelligence.id}"
 
-    # Check cache first
-    cached_tokens = await request.context.slavecache.backend.get(cache_key)
-    if cached_tokens:
-        return json.loads(cached_tokens.decode("utf-8"))
-
-    # Get token list (prefer adjusted_tokens if available)
-    token_list = intelligence.adjusted_tokens[-1] if intelligence.adjusted_tokens else intelligence.showed_tokens
-    if not token_list:
-        return []
-
-    entities = []
-    default_chain_info = {"id": None, "network_id": None, "name": None, "symbol": None, "logo": None}
-
-    async with request.context.database.dogex() as session:
-        for showed_token in token_list:
-            network = showed_token["slug"]
-            contract_address = showed_token["contract_address"]
-            warning_price_usd = float(showed_token.get("warning_price_usd") or 0)
-            warning_market_cap = float(showed_token.get("warning_market_cap") or 0)
-
-            sql = select(models.TokenChainDataModel).where(
-                models.TokenChainDataModel.network == network,
-                models.TokenChainDataModel.contract_address == contract_address
-            )
-
-            token = (await session.execute(sql)).scalars().first()
-            if not token:
-                logger.error(f"Token not found for intelligence {intelligence.id}: {showed_token}")
-                continue
-
-            try:
-                token_data = {
-                    "id": token.id,
-                    "entity_id": token.entity_id,
-                    "name": token.name,
-                    "symbol": token.symbol,
-                    "standard": token.standard,
-                    "decimals": token.decimals,
-                    "contract_address": token.contract_address,
-                    "logo": token.logo,
-                    "stats": {
-                        "warning_price_usd": warning_price_usd,
-                        "warning_market_cap": warning_market_cap,
-                        "current_price_usd": token.price_usd or 0,
-                        "current_market_cap": token.market_cap or 0,
-                        "highest_increase_rate": 0,
-                        "liquidity": token.liquidity,
-                        "volume_24h": token.volume_24h
-                    },
-                    "chain": chain_infos.get(str(token.chain_id), default_chain_info),
-                    "created_at": token.created_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-                    "updated_at": token.updated_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-                }
-                entities.append(token_data)
-            except Exception as e:
-                logger.error(f"Error processing token {contract_address}: {e}")
-
-    # Cache result
-    await request.context.mastercache.backend.set(
-        name=cache_key,
-        value=json.dumps(entities, ensure_ascii=False, cls=JsonResponseEncoder),
-        ex=settings.EXPIRES_FOR_SHOWED_TOKENS
-    )
-
-    return entities
 
 
 
