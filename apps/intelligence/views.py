@@ -1,5 +1,6 @@
 import json
 import asyncio
+from datetime import datetime
 from typing import Tuple, Optional, List, Dict, Any
 from fastapi import Depends, APIRouter, BackgroundTasks
 import settings
@@ -111,3 +112,18 @@ async def get_intelligence_info(
         code=code.CODE_OK, msg=msg.SUCCESS, data=result, is_pagination=False
     )
 
+
+
+@router.get("/token/latest")
+async def list_latest_entity(background_tasks: BackgroundTasks, last_query_time: Optional[datetime] = None, request=Depends(request_init(verify=False, limiter=True))):
+    """
+    Get the latest tokens
+    """
+    # Get token list
+    token_list = await get_latest_entities(request, last_query_time)
+
+    # Pre-cache next page
+    last_query_time = datetime.fromisoformat(token_list[-1]["display_time"].replace('Z', '+00:00'))
+    background_tasks.add_task(cache_follow_latest_appear_tokens, request, last_query_time)
+
+    return APIResponse(data=token_list, is_pagination=False)
