@@ -1,6 +1,7 @@
 import json
 import decimal
 import asyncio
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, func, and_, or_, cast, String
@@ -736,7 +737,59 @@ async def get_intelligence_info(intelligence: Any, request: Request, chain_infos
     return intelligence_info
 
 
+async def get_latest_entities(request: Request, last_query_time: Optional[datetime]):
+    """
+    Retrieve the latest tokens with caching support
+    """
+    # Initialize cache backends
+    master_cache = await request.context.mastercache.backend
+    slave_cache = await request.context.slavecache.backend
 
+    # Generate cache key
+    cache_key = f"aigun:intelligence:latest_appear_tokens:last_query_time:{last_query_time}"
+
+    # Try to get from cache first
+    cached_data = await slave_cache.get(cache_key)
+    if cached_data:
+        return json.loads(cached_data.decode("utf-8"))
+
+    # Build query conditions
+    conditions = [
+        models.TokenChainDataModel.display_time.is_not(None)
+    ]
+
+    if last_query_time:
+        # Handle timezone-aware datetime
+        naive_last_query_time = last_query_time.replace(tzinfo=None) if last_query_time.tzinfo else last_query_time
+        conditions.append(models.TokenChainDataModel.display_time < naive_last_query_time)
+
+    # Execute database query
+    async with request.context.database.dogex() as session:
+        query = select(models.TokenChainDataModel).where(
+            *conditions
+        ).options(
+            selectinload(models.TokenChainDataModel.chain)
+        ).order_by(
+            models.TokenChainDataModel.display_time.desc(),
+            models.TokenChainDataModel.market_cap.desc()
+        ).limit(20).distinct()
+
+        tokens = (await session.execute(query)).scalars().all()
+
+        # Convert to response format
+        result = [
+            schemas.TokenChainDataOutSchema.model_validate(token).model_dump()
+            for token in tokens
+        ]
+
+        # Cache the result
+        await master_cache.set(
+            name=cache_key,
+            value=json.dumps(result, ensure_ascii=False, cls=JsonResponseEncoder),
+            ex=settings.EXPIRES_FOR_LATEST_APPEAR_TOKEN
+        )
+
+        return result
 
 
 

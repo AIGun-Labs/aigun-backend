@@ -17,7 +17,7 @@ from app.dependencies import PaginationQueryParams
 from data.logger import create_logger
 from views.render import JsonResponseEncoder
 from middleware import Request
-
+from apps.intelligence.services import *
 
 router = APIRouter(prefix='/api/v1/intelligence', tags=['intelligence'])
 
