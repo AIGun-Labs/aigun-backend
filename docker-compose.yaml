@@ -1,4 +1,47 @@
+version: '3.8'
+
 services:
+  # PostgreSQL database service
+  postgres:
+    image: postgres:15-alpine
+    container_name: aigun-postgres
+    environment:
+      POSTGRES_DB: aigun_test
+      POSTGRES_USER: aigun_test
+      POSTGRES_PASSWORD: 123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - aigun-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aigun_test -d aigun_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis cache service
+  redis:
+    image: redis:7-alpine
+    container_name: aigun-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - aigun-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Main application service
   aigun-server:
     network_mode: bridge
     container_name: aigun-server
@@ -10,6 +53,33 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Database connection configuration
+      DATABASE_URL: postgresql://aigun_test:123456@postgres:5432/aigun_test
+      # Redis connection configuration
+      REDIS_URL: redis://redis:6379/0
     command: uvicorn app:app --host 0.0.0.0 --port 8000 --log-level info
-    mem_limit: 1G
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aigun-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Volume configuration
+volumes:
+  postgres_data:
+  redis_data:
+
+# Network configuration
+networks:
+  aigun-network:
+    driver: bridge
