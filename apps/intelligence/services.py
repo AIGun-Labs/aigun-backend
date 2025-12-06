@@ -792,4 +792,30 @@ async def get_latest_entities(request: Request, last_query_time: Optional[dateti
         return result
 
 
+async def cache_follow_latest_appear_tokens(request: Request, last_query_time: Optional[datetime]):
+    """Pre-cache latest appear tokens"""
+
+    slave_cache = request.context.slavecache.backend
+
+    for _ in range(5):
+        cache_key = f"aigun:intelligence:latest_appear_tokens:last_query_time:{last_query_time}"
+        cached_data = await slave_cache.get(cache_key)
+
+        if cached_data:
+            result = json.loads(cached_data.decode("utf-8"))
+        else:
+            result = await get_latest_entities(request, last_query_time)
+
+        if not result:
+            break
+
+        # Parse last display time
+        time_str = result[-1]["display_time"]
+        last_query_time = (
+            datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+            if isinstance(time_str, str)
+            else time_str
+        )
+
+
 
