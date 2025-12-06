@@ -486,83 +486,59 @@ async def subscription_websocket(websocket: WebSocket, data: WebSocketRequest):
 
 @on_startup
 async def websocket_send_message(app: FastAPI):
-    """
-    Filter users and send messages
-    :param app: FastAPI application object
-    """
+    """Filter users and send messages"""
     if not isinstance(app, FastAPI):
         return
+    
     context: Context = app.state.context
+    await context.amqp.ensure_connection()
+    await context.amqp._channel.declare_queue(name=settings.INTELLIGENCE_QUEUE, durable=True)
 
-    rabbit = context.amqp
-    await rabbit.ensure_connection()
-    await rabbit._channel.declare_queue(name=settings.INTELLIGENCE_QUEUE, durable=True)
-
-    # Get messages from the message queue
     async for message_data, message in context.amqp.receive(settings.INTELLIGENCE_QUEUE):
+        try:
+            # Check channel status
+            if message.channel.is_closed:
+                logger.warning("Message channel closed, reconnecting...")
+                await context.amqp.ensure_connection()
+                await message.ack()
+                continue
 
-            # TODO Note: The message queue name should include the process PID
-                try:
-                    # RabbitMQ reconnection mechanism
-                    if message.channel.is_closed:
-                        logger.warning("Message channel is closed, reconnecting...")
-                        await context.amqp.ensure_connection()
-                        continue
-                except Exception as e:
-                    if not message_data.message.get("title") and not message_data.message.get("content"):
-                        await message.ack()
-                        continue
+            intelligence = json.loads(message.body.decode())
+            
+            # Filter non-valuable intelligence
+            if not intelligence.get("is_valuable"):
+                logger.info(f"Filtered non-valuable intelligence: {intelligence.get('id')}")
+                await message.ack()
+                continue
 
-                try:
-                    intelligence = json.loads(message.body.decode())
-                    logger.info(f"Received queue message: {intelligence}")
-                    logger.info(f"agent_tag: {intelligence.get('agent_tag')}")
-                    # Store the received message format in a txt file for subsequent testing
-                    if not intelligence["is_valuable"]:
-                        logger.info(f"Intelligence has no investment value and has been filtered. intelligence_id: {intelligence['id']}")
-                        continue
+            agent_tag = intelligence.get("agent_tag")
+            logger.info(f"Processing intelligence {intelligence.get('id')} with agent_tag: {agent_tag}")
 
-                    sub_word = set()
-                    agent_tag = intelligence.get("agent_tag")
-                    if agent_tag:
-                        sub_word.add(agent_tag)
+            # Build subscription words
+            sub_word = {agent_tag} if agent_tag else set()
 
-                    intelligence = services.remove_part_info(intelligence)
+            # Enrich intelligence data
+            intelligence = services.remove_part_info(intelligence)
+            intelligence["author"] = await services.get_author_info(intelligence, context)
+            intelligence["monitor_time"] = await services.get_monitor_time(
+                intelligence["spider_time"], intelligence["published_at"]
+            )
 
-                    # Get author information
-                    author_info = await services.get_author_info(intelligence, context)
+            # Get AI agent info
+            if agent_tag:
+                ai_agents = await user_services.ai_agent_follow_services.get_ai_agent_list(app.state)
+                agent = next((a for a in ai_agents if a.tag.slug == agent_tag), None)
+                if agent:
+                    intelligence["ai_agent"] = {"avatar": agent.avatar, "name": agent.name}
 
-                    # Get monitoring time
-                    monitor_time = await services.get_monitor_time(intelligence["spider_time"], intelligence["published_at"])
+            # Process entities
+            chain_mapping_info = await services.get_all_chain_info(intelligence, context)
+            intelligence["entities"] = services.handle_entity_info(intelligence["entities"], chain_mapping_info)
 
-                    intelligence["author"] = author_info
-                    intelligence["monitor_time"] = monitor_time
+            # Send to subscribers
+            await global_subscription.send_message(intelligence, sub_word)
 
-                    # Get AI_Agent information
-                    ai_agents: List[user_schemas.AiAgentOutSchema] = await user_services.ai_agent_follow_services.get_ai_agent_list(app.state)
-
-                    # Find the agent in ai_agent_infos based on the tag
-                    agent = None
-                    if agent_tag:
-                        agent = next((agent for agent in ai_agents if agent.tag.slug == agent_tag), None)
-                    if agent:
-                        intelligence["ai_agent"] = {"avatar": agent.avatar, "name": agent.name}
-                    logger.info(f"Intelligence AI Agent: {intelligence.get('ai_agent')}")
-
-                    # Get all chain information at once
-                    chain_mapping_info = await services.get_all_chain_info(intelligence, context)
-
-                    # Process token information
-                    entity_list = services.handle_entity_info(intelligence["entities"], chain_mapping_info)
-
-                    intelligence["entities"] = entity_list
-
-                    # Send message to the corresponding WebSocket objects of the subscription set
-                    await global_subscription.send_message(intelligence, sub_word)
-
-
-                except Exception as e:
-                        logger.exception(f"Error processing queue message: intelligence: {json.loads(message.body.decode())}, error: {e}")
-
-                finally:
-                    await message.ack()
+        except Exception as e:
+            logger.exception(f"Error processing queue message: {e}")
+        finally:
+            await message.ack()
