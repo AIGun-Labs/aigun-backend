@@ -20,86 +20,79 @@ def remove_part_info(intelligence: Dict[str, Any]) -> Dict[str, Any]:
     return intelligence
 
 
+DEFAULT_AUTHOR_INFO = {
+    "platform": {"id": None, "name": None, "logo": None},
+    "slug": None,
+    "avatar": None,
+    "action": None
+}
+
+X_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/960px-X_logo.jpg?20230724061250"
+
+
 async def get_author_info(intelligence: Union[Dict[str, Any], Any], context: Any) -> Dict[str, Any]:
     """Get author information with caching"""
     intelligence_id = intelligence["id"] if isinstance(intelligence, dict) else intelligence.id
     cache_key = f"aigun:intelligence:author_info:intelligence_id:{intelligence_id}"
 
-    # Check cache
     cached_info = await context.slavecache.backend.get(cache_key)
     if cached_info:
-        await context.mastercache.backend.expire(name=cache_key, time=settings.EXPIRES_FOR_AUTHOR_INFO)
+        await context.mastercache.backend.expire(cache_key, settings.EXPIRES_FOR_AUTHOR_INFO)
         return json.loads(cached_info.decode("utf-8"))
 
-    default_author_info = {
-        "platform": {"id": None, "name": None, "logo": None},
-        "slug": None,
-        "avatar": None,
-        "action": None
-    }
-
     async with context.database.dogex() as session:
-        # Query with eager loading
         intel = (await session.execute(
             select(models.IntelligenceModel)
             .where(models.IntelligenceModel.id == intelligence_id)
-            .options(
-                selectinload(models.IntelligenceModel.entity_intelligences)
-                .selectinload(models.EntityIntelligenceModel.entity)
-                .selectinload(models.EntityModel.entity_datasources)
-                .selectinload(models.EntityDatasource.account)
-            )
+            .options(selectinload(models.IntelligenceModel.entity_intelligences))
         )).scalars().first()
 
-        if not intel or not intel.entity_intelligences:
-            return default_author_info
+        if not intel:
+            return DEFAULT_AUTHOR_INFO
 
-        # Find author entity
-        for entity_intelligence in intel.entity_intelligences:
-            if entity_intelligence.type != "author" or not entity_intelligence.master_id:
-                continue
+        # Find author entity_intelligence
+        author_ei = next(
+            (ei for ei in intel.entity_intelligences if ei.type == "author" and ei.master_id),
+            None
+        )
+        
+        if not author_ei:
+            return DEFAULT_AUTHOR_INFO
 
-            account = (await session.execute(
-                select(models.AccountModel).where(models.AccountModel.id == entity_intelligence.master_id)
-            )).scalars().first()
+        account = (await session.execute(
+            select(models.AccountModel).where(models.AccountModel.id == author_ei.master_id)
+        )).scalars().first()
 
-            if not account:
-                logger.error(f"Account not found: {entity_intelligence.master_id} for intelligence {intelligence_id}")
-                continue
+        if not account:
+            logger.error(f"Account not found: {author_ei.master_id} for intelligence {intelligence_id}")
+            return DEFAULT_AUTHOR_INFO
 
-            platform_name = (
-                entity_intelligence.master_type.strip().split(",", 1)[0][1:]
-                if entity_intelligence.master_type else "twitter"
+        platform_name = (
+            author_ei.master_type.strip().split(",", 1)[0][1:]
+            if author_ei.master_type else "twitter"
+        )
+
+        data = {
+            "platform": {"id": account.id, "name": platform_name, "logo": X_LOGO_URL},
+            "slug": account.screen_name,
+            "avatar": account.avatar,
+            "prompt": None
+        }
+
+        # Add prompt for twitter
+        if intel.type == "twitter":
+            subtype = intelligence.get("subtype") if isinstance(intelligence, dict) else intel.subtype
+            description = ws_schemas.twitter_action_prompt_mapping.get(
+                subtype, "'s new release on X has sparked investment opportunities."
             )
+            data["prompt"] = account.name + description
 
-            data = {
-                "platform": {
-                    "id": account.id,
-                    "name": platform_name,
-                    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/960px-X_logo.jpg?20230724061250"
-                },
-                "slug": account.screen_name,
-                "avatar": account.avatar,
-                "prompt": None
-            }
-
-            # Add prompt for twitter
-            if intel.type == "twitter":
-                subtype = intelligence.get("subtype") if isinstance(intelligence, dict) else intel.subtype
-                description = ws_schemas.twitter_action_prompt_mapping.get(
-                    subtype, "'s new release on X has sparked investment opportunities."
-                )
-                data["prompt"] = account.name + description
-
-            # Cache and return
-            await context.mastercache.backend.set(
-                name=cache_key,
-                value=json.dumps(data, ensure_ascii=False, cls=JsonResponseEncoder),
-                ex=settings.EXPIRES_FOR_AUTHOR_INFO
-            )
-            return data
-
-    return default_author_info
+        await context.mastercache.backend.set(
+            cache_key,
+            json.dumps(data, ensure_ascii=False, cls=JsonResponseEncoder),
+            ex=settings.EXPIRES_FOR_AUTHOR_INFO
+        )
+        return data
 
 
 def _parse_datetime(dt: Union[str, datetime, None]) -> Optional[datetime]:
