@@ -817,5 +817,19 @@ async def cache_follow_latest_appear_tokens(request: Request, last_query_time: O
             else time_str
         )
 
+async def list_token_urls(request: Request,  network: str, address: str):
 
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+    token_urls_key = f"aigun:intelligence:token_urls:network:{network}:address:{address}"
+
+    data = await slave_cache.get(token_urls_key)
+    if data:
+        return json.loads(data.decode("utf-8"))
+
+    data = await get_token_urls(request, network, address)
+
+    await master_cache.set(name=token_urls_key, value=json.dumps(data, ensure_ascii=False), ex=settings.EXPIRES_FOR_TOKEN_URLS)
+
+    return data
 
