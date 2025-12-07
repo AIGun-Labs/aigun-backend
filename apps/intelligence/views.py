@@ -127,3 +127,14 @@ async def list_latest_entity(background_tasks: BackgroundTasks, last_query_time:
     background_tasks.add_task(cache_follow_latest_appear_tokens, request, last_query_time)
 
     return APIResponse(data=token_list, is_pagination=False)
+
+
+@router.get("/token/urls")
+async def get_token_urls(network: str, address: str, request=Depends(request_init(verify=True, limiter=True))):
+    """
+    Obtain off chain URL data for tokens. Because data needs to be obtained through APIs, it is separated into a separate interface to obtain data
+    """
+    urls = await list_token_urls(request, network, address)
+
+    return APIResponse(data=urls)
+
