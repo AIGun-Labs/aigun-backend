@@ -833,3 +833,35 @@ async def list_token_urls(request: Request,  network: str, address: str):
 
     return data
 
+
+async def get_token_urls(request: Request, network: str, address: str):
+    """
+    Get Token Community Link
+    """
+
+    # All link types in the table
+    link_types = await get_all_link_types(request)
+    result = {}
+    for link_type in link_types:
+        result[link_type] = ""
+
+    # Obtain the link address corresponding to the token
+    async  with request.context.database.dogex() as session:
+        sql = select(
+            models.TokenSocialLinksModel.link_type,
+            models.TokenSocialLinksModel.url
+        ).where(
+            models.TokenSocialLinksModel.network == network,
+            models.TokenSocialLinksModel.contract_address == address,
+            models.TokenSocialLinksModel.is_deleted == False
+        )
+
+        token_social_links = (await session.execute(sql)).mappings().all()
+
+        if not token_social_links:
+            return result
+
+        # Obtain the corresponding link type
+        data = await process_token_social_links(token_social_links, result)
+
+        return data
