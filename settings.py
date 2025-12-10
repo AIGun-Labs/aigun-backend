@@ -131,7 +131,7 @@ WALLET_API_BASE_URL = os.getenv('WALLET_API_BASE_URL', "https://api.idogex.ai")
 
 # ----------Secret Keys-----------------
 # Wallet AES Encryption Key
-WALLET_INFO_SECRET_KEY = os.getenv('WALLET_INFO_SECRET_KEY', "HlmIeNtJxR3bVwRT063DQLfx5EXSLFw0")
+WALLET_INFO_SECRET_KEY = os.getenv('WALLET_INFO_SECRET_KEY')
 
 CMC_API_KEY = os.getenv('CMC_API_KEY')
 
@@ -155,3 +155,6 @@ SERVER_APP_LAYER = int(os.getenv('SERVER_APP_LAYER', '5'))
 
 TASK_WORKER = os.getenv('TASK_WORKER', 'TaskWorker')
 PULL_WORKER = os.getenv('PULL_WORKER', 'PullWorker')
+
+
+EXPIRES_FOR_TOKEN_SOCIAL_LINK_TYPES = int(os.getenv('EXPIRES_FOR_TOKEN_SOCIAL_LINK_TYPES', 3600 * 12))

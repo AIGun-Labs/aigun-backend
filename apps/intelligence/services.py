@@ -865,3 +865,32 @@ async def get_token_urls(request: Request, network: str, address: str):
         data = await process_token_social_links(token_social_links, result)
 
         return data
+
+
+
+
+async def get_all_link_types(request: Request):
+    """
+    Retrieve all link types from the table
+    """
+
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+    link_types_key = "aigun:intelligence:token_social_link_types"
+
+    data = await slave_cache.get(link_types_key)
+    if data is not None:
+        return json.loads(data.decode("utf-8"))
+
+    async  with request.context.database.dogex() as session:
+        sql = select(
+            models.TokenSocialLinksModel.link_type
+        ).where(
+            models.TokenSocialLinksModel.is_deleted == False
+        ).distinct()
+
+        data = (await session.execute(sql)).scalars().all()
+
+    await master_cache.set(name=link_types_key, value=json.dumps(data, ensure_ascii=False), ex=settings.EXPIRES_FOR_TOKEN_SOCIAL_LINK_TYPES)
+
+    return data
