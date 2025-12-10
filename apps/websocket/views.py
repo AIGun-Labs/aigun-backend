@@ -489,39 +489,36 @@ async def websocket_send_message(app: FastAPI):
     """Filter users and send messages"""
     if not isinstance(app, FastAPI):
         return
-    
+
     context: Context = app.state.context
     await context.amqp.ensure_connection()
     await context.amqp._channel.declare_queue(name=settings.INTELLIGENCE_QUEUE, durable=True)
 
     async for message_data, message in context.amqp.receive(settings.INTELLIGENCE_QUEUE):
         try:
-            # Check channel status
             if message.channel.is_closed:
                 logger.warning("Message channel closed, reconnecting...")
                 await context.amqp.ensure_connection()
-                await message.ack()
                 continue
 
             intelligence = json.loads(message.body.decode())
-            
-            # Filter non-valuable intelligence
+
             if not intelligence.get("is_valuable"):
                 logger.info(f"Filtered non-valuable intelligence: {intelligence.get('id')}")
-                await message.ack()
                 continue
 
             agent_tag = intelligence.get("agent_tag")
             logger.info(f"Processing intelligence {intelligence.get('id')} with agent_tag: {agent_tag}")
 
-            # Build subscription words
-            sub_word = {agent_tag} if agent_tag else set()
-
             # Enrich intelligence data
             intelligence = services.remove_part_info(intelligence)
-            intelligence["author"] = await services.get_author_info(intelligence, context)
-            intelligence["monitor_time"] = await services.get_monitor_time(
-                intelligence["spider_time"], intelligence["published_at"]
+
+            author_task = services.get_author_info(intelligence, context)
+            monitor_task = services.get_monitor_time(intelligence["spider_time"], intelligence["published_at"])
+            chain_task = services.get_all_chain_info(intelligence, context)
+
+            intelligence["author"], intelligence["monitor_time"], chain_mapping_info = await asyncio.gather(
+                author_task, monitor_task, chain_task
             )
 
             # Get AI agent info
@@ -531,12 +528,10 @@ async def websocket_send_message(app: FastAPI):
                 if agent:
                     intelligence["ai_agent"] = {"avatar": agent.avatar, "name": agent.name}
 
-            # Process entities
-            chain_mapping_info = await services.get_all_chain_info(intelligence, context)
             intelligence["entities"] = services.handle_entity_info(intelligence["entities"], chain_mapping_info)
 
             # Send to subscribers
-            await global_subscription.send_message(intelligence, sub_word)
+            await global_subscription.send_message(intelligence, {agent_tag} if agent_tag else set())
 
         except Exception as e:
             logger.exception(f"Error processing queue message: {e}")
