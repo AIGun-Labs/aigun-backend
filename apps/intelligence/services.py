@@ -894,3 +894,17 @@ async def get_all_link_types(request: Request):
     await master_cache.set(name=link_types_key, value=json.dumps(data, ensure_ascii=False), ex=settings.EXPIRES_FOR_TOKEN_SOCIAL_LINK_TYPES)
 
     return data
+
+
+
+async def process_token_social_links(token_social_links: List[Dict], result: Dict):
+    """
+    Processing Link Data Format
+    """
+    for token_social_link in token_social_links:
+        key = token_social_link["link_type"]
+        val = token_social_link["url"]
+
+        result[key] = val
+
+    return result

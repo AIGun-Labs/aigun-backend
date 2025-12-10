@@ -347,3 +347,13 @@ class TagIntelligenceModel(Base):
         primaryjoin="TagIntelligenceModel.intelligence_id == IntelligenceModel.id",
         foreign_keys=[intelligence_id]
     )
+
+
+class TokenSocialLinksModel(Base):
+    __tablename__ = "token_social_links"
+
+    network = Column(Text, comment="chain")
+    contract_address = Column(Text, comment="contract address")
+    link_type = Column(Text, comment="link type")
+    url = Column(Text, comment="url link")
+    rank = Column(Integer, comment="order key")
