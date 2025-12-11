@@ -908,3 +908,43 @@ async def process_token_social_links(token_social_links: List[Dict], result: Dic
         result[key] = val
 
     return result
+
+
+
+async def retrieve_token_related_intel_count(request: Request, query_params):
+    master_cache = request.context.mastercache.backend
+    slave_cache = request.context.slavecache.backend
+
+    # First try to get the total number of items from the cache
+    total = await slave_cache.get(f"aigun:intelligence:intelligence_list:count:query_params:{query_params.model_dump_json()}")
+    if total is not None:
+        return int(total.decode("utf-8")) if total.decode("utf-8") else 0
+
+    # Cache miss, query from the database
+    async with request.context.database.dogex() as session:
+        sql = select(IntelligenceModel)
+
+        entity_load_options = selectinload(
+            IntelligenceModel.entity_intelligences
+        ).selectinload(
+            EntityIntelligenceModel.entity
+        ).options(
+            selectinload(EntityModel.tokendata_entity)
+        )
+
+        if query_params.address is not None and query_params.network is not None:
+            sql = sql.join(IntelligenceModel.entity_intelligences).join(EntityIntelligenceModel.entity).join(
+                EntityModel.tokendata_entity)
+            sql = sql.where(and_(
+                TokenChainDataModel.contract_address == query_params.address,
+                TokenChainDataModel.network == query_params.network
+            ))
+
+        distinct_query = sql.where(IntelligenceModel.is_valuable == True).options(defer(IntelligenceModel.extra_datas), entity_load_options).distinct()
+        total_count_sql = select(func.count()).select_from(distinct_query.subquery())
+
+        total: int = (await session.execute(total_count_sql)).scalar()
+
+        await master_cache.set(name=f"aigun:intelligence:intelligence_list:count:query_params:{query_params.model_dump_json()}", value=total, ex=3600 * 6)
+
+        return total
