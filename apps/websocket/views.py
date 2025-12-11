@@ -537,3 +537,4 @@ async def websocket_send_message(app: FastAPI):
             logger.exception(f"Error processing queue message: {e}")
         finally:
             await message.ack()
+

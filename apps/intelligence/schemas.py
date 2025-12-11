@@ -202,3 +202,18 @@ class IntelligenceWithoutEntitiesOutSchema(BaseModel):
 
         return data
 
+
+class IntelligenceQueryParamsCount(BaseModel):
+    type: Optional[str] | None = Query(default=None, description="Intelligence type: twitter/telegram/news")
+    subtype: Optional[str] | None = Query(default=None, description="Subtype (optional)")
+    platform_type: Optional[str] | None = Query(default=None, description="Platform type")
+
+    entity_id: Optional[str] | None = Query(default=None, description="Associated entity ID")
+    is_valuable: Optional[bool] | None = Query(default=True, description="Is valuable")
+    influence_level: Optional[str] | None = Query(default=None, description="Entity influence level: Ex/S/A/B")
+    entity_type: Optional[str] | None = Query(default=None, description="Entity type: person/token")
+
+    key_word: Optional[str] | None = Query(default=None, description="Keyword")
+
+    address: Optional[str] | None = Query(default=None, description="Token address")
+    network: Optional[str] | None = Query(default=None, description="Chain network")

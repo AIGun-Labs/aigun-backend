@@ -138,3 +138,16 @@ async def get_token_urls(network: str, address: str, request=Depends(request_ini
 
     return APIResponse(data=urls)
 
+
+@router.get("/token/count")
+async def get_token_related_intel_count(
+        query_params: schemas.IntelligenceQueryParamsCount = Depends(),
+        request=Depends(request_init(verify=False, limiter=True)),
+):
+    """
+    Total number of token-related information retrieved (for frontend compatibility)
+    """
+    total = await retrieve_token_related_intel_count(request, query_params)
+
+    return APIResponse(data=total)
+

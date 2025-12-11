@@ -173,3 +173,5 @@ def handle_entity_info(entity_list: List[Dict[str, Any]], chain_mapping_info: Di
         }
         for e in entity_list
     ]
+
+
