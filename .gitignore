@@ -166,3 +166,4 @@ _env_*
 split_get_adress.py
 test_send.py
 test_messge.json
+CLAUDE.md
