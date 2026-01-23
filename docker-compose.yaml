@@ -1,85 +1,81 @@
-version: '3.8'
-
 services:
-  # PostgreSQL database service
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: aigun-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: aigun_test
-      POSTGRES_USER: aigun_test
-      POSTGRES_PASSWORD: 123456
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: always
-    networks:
-      - aigun-network
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aigun_test -d aigun_test"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
 
-  # Redis cache service
   redis:
     image: redis:7-alpine
     container_name: aigun-redis
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"
     volumes:
       - redis_data:/data
-    restart: always
-    networks:
-      - aigun-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
 
-  # Main application service
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: aigun-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   aigun-server:
-    network_mode: bridge
-    container_name: aigun-server
-    tty: true
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: aigun-server
+    restart: unless-stopped
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      - "${APP_PORT}:8000"
     environment:
-      # Database connection configuration
-      DATABASE_URL: postgresql://aigun_test:123456@postgres:5432/aigun_test
-      # Redis connection configuration
-      REDIS_URL: redis://redis:6379/0
-    command: uvicorn app:app --host 0.0.0.0 --port 8000 --log-level info
-    restart: always
+      DATABASE_URL_DOGEX: ${DATABASE_URL_DOGEX}
+      CACHE_URL: ${CACHE_URL}
+      SLAVE_CACHE_URL: ${SLAVE_CACHE_URL}
+      RABBIT_URL: ${RABBIT_URL}
+      INTELLIGENCE_QUEUE: ${INTELLIGENCE_QUEUE}
+      JWT_PRIVATE_FILE: ${JWT_PRIVATE_FILE}
+      JWT_PUBLIC_FILE: ${JWT_PUBLIC_FILE}
+      ENV: ${ENV}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - aigun-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      rabbitmq:
+        condition: service_healthy
 
-# Volume configuration
 volumes:
   postgres_data:
   redis_data:
-
-# Network configuration
-networks:
-  aigun-network:
-    driver: bridge
+  rabbitmq_data:
