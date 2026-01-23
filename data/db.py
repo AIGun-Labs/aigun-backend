@@ -66,7 +66,7 @@ def declare_database(config: DatabaseConfig | None = None, *, url: str | None = 
             pool_timeout=30,
             pool_recycle=300, # 3600
             pool_pre_ping=True,
-            connect_args={"server_settings": {"search_path": schema.lower()}}
+            connect_args={"server_settings": {"search_path": f"{schema.lower()},public"}}
         ),
         class_=AsyncSession,
         autoflush=autoflush,
